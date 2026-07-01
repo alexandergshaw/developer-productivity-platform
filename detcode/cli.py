@@ -12,12 +12,15 @@ import difflib
 import json
 import sys
 
+from . import cnl, planner
 from .determinism import TOOL_VERSION
 from .engines import repair, rewrite, scaffold, synth
 
 
 def _read(path: str) -> str:
-    with open(path, "r", encoding="utf-8", newline="") as fh:
+    # utf-8-sig strips a leading BOM if present (common on Windows editors),
+    # which would otherwise break ast.parse. Output is always written BOM-less.
+    with open(path, "r", encoding="utf-8-sig", newline="") as fh:
         return fh.read()
 
 
@@ -94,6 +97,13 @@ def _cmd_repair(args) -> int:
     return _emit(args, args.file, before, result)
 
 
+def _cmd_do(args) -> int:
+    intent = cnl.parse(args.command)
+    before = _read(args.file)
+    result = planner.run(intent, before)
+    return _emit(args, args.file, before, result)
+
+
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--file", required=True, help="Python source file to operate on")
     out = p.add_mutually_exclusive_group()
@@ -146,6 +156,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rp.set_defaults(handler=_cmd_repair)
 
+    do = sub.add_parser(
+        "do",
+        help='run a controlled-natural-language command, e.g. "remove unused imports"',
+    )
+    _add_common(do)
+    do.add_argument("command", help='e.g. "rename local total to acc in compute"')
+    do.set_defaults(handler=_cmd_do)
+
     return parser
 
 
@@ -161,6 +179,8 @@ def main(argv: list[str] | None = None) -> int:
         synth.NoSolution,
         repair.SpecError,
         repair.NoRepair,
+        cnl.CNLError,
+        planner.UnknownIntent,
     ) as exc:
         print(f"detcode: refused: {exc}", file=sys.stderr)
         return 2

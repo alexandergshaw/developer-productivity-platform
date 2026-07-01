@@ -62,6 +62,10 @@ detcode synth --examples examples/fullname.examples.json
 detcode repair --file examples/buggy_area.py --spec examples/buggy_area.repair.json --diff
 # -    return width + height
 # +    return width * height
+
+# Or drive the engines with a controlled-natural-language command
+detcode do "rename local total to acc in compute" --file app.py --diff
+detcode do "remove unused imports" --file app.py --write
 ```
 
 See [examples/](examples/) for the spec, example-set, and repair-spec formats.
@@ -93,9 +97,9 @@ Capabilities are added as self-contained verticals, in this order:
 3. **Example-driven synthesis** — ✅ `synth` (bottom-up enumerative search over a typed DSL)
 4. **Bug-fix / repair** — ✅ `repair` (token-level mutation search, tests as the oracle)
 
-The intent front-end evolves in parallel: I/O examples + types (`synth`) →
-structured spec/DSL (`scaffold`) → controlled natural language (next: a thin
-deterministic grammar over the existing engines).
+The intent front-end evolved in parallel through all three planned modes:
+I/O examples + types (`synth`) → structured spec/DSL (`scaffold`) → controlled
+natural language (`do`, via `cnl.py` → `ir.py` → `planner.py` → engine).
 
 ## Development
 

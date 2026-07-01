@@ -49,7 +49,12 @@ detcode rename-local --file app.py --func compute --from total --to accumulator 
 
 # Remove module-level imports that are never used
 detcode remove-unused-imports --file app.py --write
+
+# Generate a module of dataclasses/enums from a JSON spec
+detcode scaffold --spec examples/models.spec.json --out models.py
 ```
+
+See [examples/models.spec.json](examples/models.spec.json) for the spec format.
 
 - default: print transformed source to stdout
 - `--diff`: print a unified diff instead
@@ -74,7 +79,7 @@ pure function of an `Intent` plus source. Edits are span-based
 Capabilities are added as self-contained verticals, in this order:
 
 1. **Refactors / codemods** — ✅ `rename-local`, `remove-unused-imports`
-2. **Scaffolding / codegen** — generate boilerplate from a structured spec
+2. **Scaffolding / codegen** — ✅ `scaffold` (dataclasses + enums from a JSON spec)
 3. **Example-driven synthesis** — small functions from I/O examples + types
 4. **Bug-fix / repair** — fault-localize + constrained repair against a test
 

@@ -1,0 +1,4 @@
+# Normalize line endings so the repo is byte-consistent across platforms,
+# which keeps the determinism gate meaningful.
+* text=auto eol=lf
+*.png binary

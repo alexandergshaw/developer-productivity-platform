@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import json
 import sys
 
 from .determinism import TOOL_VERSION
-from .engines import rewrite
+from .engines import rewrite, scaffold
 
 
 def _read(path: str) -> str:
@@ -60,6 +61,17 @@ def _cmd_remove_unused_imports(args) -> int:
     return _emit(args, args.file, before, result)
 
 
+def _cmd_scaffold(args) -> int:
+    spec = json.loads(_read(args.spec))
+    result = scaffold.scaffold(spec)
+    if args.out:
+        _write(args.out, result.source)
+        print(f"{args.out}: generated ({result.report.get('rule')})", file=sys.stderr)
+    else:
+        sys.stdout.write(result.source)
+    return 0
+
+
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--file", required=True, help="Python source file to operate on")
     out = p.add_mutually_exclusive_group()
@@ -88,6 +100,13 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(ri)
     ri.set_defaults(handler=_cmd_remove_unused_imports)
 
+    sc = sub.add_parser(
+        "scaffold", help="generate a Python module (dataclasses/enums) from a JSON spec"
+    )
+    sc.add_argument("--spec", required=True, help="JSON spec file")
+    sc.add_argument("--out", help="write generated module to this path (default: stdout)")
+    sc.set_defaults(handler=_cmd_scaffold)
+
     return parser
 
 
@@ -96,10 +115,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.handler(args)
-    except rewrite.Unsafe as exc:
+    except (rewrite.Unsafe, scaffold.SpecError) as exc:
         print(f"detcode: refused: {exc}", file=sys.stderr)
         return 2
-    except (OSError, SyntaxError) as exc:
+    except (OSError, SyntaxError, json.JSONDecodeError) as exc:
         print(f"detcode: error: {exc}", file=sys.stderr)
         return 1
 

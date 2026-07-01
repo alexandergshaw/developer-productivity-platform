@@ -31,6 +31,9 @@ GRAMMAR = (
     "remove unused imports",
     "explain <func>",
     "explain",
+    "add a docstring to <func>",
+    "document <func>",
+    "document",
     "fix <func> so that <func>(args) == value [and ...]",
     "write a function <name> where <name>(args) == value [and ...]",
     "generate tests for <func> where <func>(args) == value [and ...]",
@@ -112,6 +115,16 @@ _PATTERNS = (
     (
         re.compile(r"^explain$", re.IGNORECASE),
         lambda m: Intent.of("explain"),
+    ),
+    (
+        re.compile(
+            r"^(?:add\s+a\s+docstring\s+to|document)\s+(?P<func>\w+)$", re.IGNORECASE
+        ),
+        lambda m: Intent.of("document", func=m["func"]),
+    ),
+    (
+        re.compile(r"^document$", re.IGNORECASE),
+        lambda m: Intent.of("document"),
     ),
     (
         re.compile(r"^fix\s+(?P<func>\w+)\s+so\s+that\s+(?P<cond>.+)$", re.IGNORECASE),

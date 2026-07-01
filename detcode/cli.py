@@ -14,7 +14,7 @@ import sys
 
 from . import cnl, planner
 from .determinism import TOOL_VERSION
-from .engines import explain, gentest, repair, retrieve, rewrite, scaffold, synth
+from .engines import document, explain, gentest, repair, retrieve, rewrite, scaffold, synth
 
 
 class _EditResult:
@@ -106,6 +106,12 @@ def _cmd_repair(args) -> int:
     return _emit(args, args.file, before, result)
 
 
+def _cmd_document(args) -> int:
+    before = _read(args.file)
+    result = document.add_docstrings(before, args.func)
+    return _emit(args, args.file, before, result)
+
+
 def _cmd_explain(args) -> int:
     result = explain.explain(_read(args.file), args.func)
     print(result.text)
@@ -192,6 +198,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rp.set_defaults(handler=_cmd_repair)
 
+    dc = sub.add_parser(
+        "document", help="insert generated docstrings (functions lacking one)"
+    )
+    _add_common(dc)
+    dc.add_argument("--func", help="document only this function (default: all undocumented)")
+    dc.set_defaults(handler=_cmd_document)
+
     ex = sub.add_parser("explain", help="explain a function or module (AST-derived)")
     ex.add_argument("--file", required=True, help="Python source file")
     ex.add_argument("--func", help="function to explain (default: whole module)")
@@ -233,6 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         repair.NoRepair,
         explain.ExplainError,
         gentest.SpecError,
+        document.DocError,
         cnl.CNLError,
         planner.UnknownIntent,
         planner.MissingSource,

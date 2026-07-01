@@ -24,7 +24,7 @@ Response shape::
 from __future__ import annotations
 
 from . import cnl, planner
-from .engines import explain, gentest, repair, retrieve, rewrite, scaffold, synth
+from .engines import document, explain, gentest, repair, retrieve, rewrite, scaffold, synth
 
 REFUSALS = (
     rewrite.Unsafe,
@@ -35,6 +35,7 @@ REFUSALS = (
     repair.NoRepair,
     gentest.SpecError,
     explain.ExplainError,
+    document.DocError,
     cnl.CNLError,
     planner.UnknownIntent,
     planner.MissingSource,
@@ -91,6 +92,9 @@ def run_request(req) -> dict:
         if tool == "explain":
             r = explain.explain(str(req.get("source") or ""), req.get("func") or None)
             return _text(r.text, r.report)
+        if tool == "document":
+            r = document.add_docstrings(str(req.get("source") or ""), req.get("func") or None)
+            return _edit(r.source, r.changed, r.report)
         return {"ok": False, "refused": False, "error": f"unknown tool {tool!r}"}
     except REFUSALS as exc:
         return {"ok": False, "refused": True, "error": str(exc)}

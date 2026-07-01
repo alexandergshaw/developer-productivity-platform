@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass
 
 from .ir import Intent
-from .engines import explain, gentest, repair, retrieve, rewrite, scaffold
+from .engines import document, explain, gentest, repair, retrieve, rewrite, scaffold
 
 
 class UnknownIntent(Exception):
@@ -67,6 +67,10 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
     if op == "explain":
         r = explain.explain(_needs_source(intent, source), intent.get("func"))
         return Outcome(None, r.text, False, r.report)
+
+    if op == "document":
+        r = document.add_docstrings(_needs_source(intent, source), intent.get("func"))
+        return Outcome(r.source, None, r.changed, r.report)
 
     if op == "repair":
         r = repair.repair(_needs_source(intent, source), _spec(intent))

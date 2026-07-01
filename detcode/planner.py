@@ -16,7 +16,7 @@ import json
 from dataclasses import dataclass
 
 from .ir import Intent
-from .engines import explain, gentest, repair, rewrite, scaffold, synth
+from .engines import explain, gentest, repair, retrieve, rewrite, scaffold
 
 
 class UnknownIntent(Exception):
@@ -73,7 +73,9 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
         return Outcome(r.source, None, r.changed, r.report)
 
     if op == "synth":
-        r = synth.synthesize(_spec(intent))
+        # Retrieval-first: known functions (loops, recursion) come from the
+        # verified corpus; novel ones from enumerative synthesis.
+        r = retrieve.write_function(_spec(intent))
         return Outcome(None, r.source, False, r.report)
 
     if op == "scaffold":

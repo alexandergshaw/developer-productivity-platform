@@ -24,7 +24,7 @@ Response shape::
 from __future__ import annotations
 
 from . import cnl, planner
-from .engines import explain, gentest, repair, rewrite, scaffold, synth
+from .engines import explain, gentest, repair, retrieve, rewrite, scaffold, synth
 
 REFUSALS = (
     rewrite.Unsafe,
@@ -66,7 +66,7 @@ def run_request(req) -> dict:
             kind = _text if intent.operation == "explain" else _generated
             return kind(outcome.output or "", outcome.report)
         if tool == "synth":
-            r = synth.synthesize(req.get("spec") or {})
+            r = retrieve.write_function(req.get("spec") or {})
             return _generated(r.source, r.report)
         if tool == "scaffold":
             r = scaffold.scaffold(req.get("spec") or {})

@@ -14,7 +14,7 @@ import sys
 
 from . import cnl, planner
 from .determinism import TOOL_VERSION
-from .engines import explain, gentest, repair, rewrite, scaffold, synth
+from .engines import explain, gentest, repair, retrieve, rewrite, scaffold, synth
 
 
 class _EditResult:
@@ -88,7 +88,7 @@ def _cmd_synth(args) -> int:
     spec = json.loads(_read(args.examples))
     if args.name:
         spec["name"] = args.name
-    result = synth.synthesize(spec)
+    result = retrieve.write_function(spec)
     if args.out:
         _write(args.out, result.source)
         print(

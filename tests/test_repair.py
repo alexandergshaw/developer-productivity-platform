@@ -139,5 +139,111 @@ class RepairTests(unittest.TestCase):
             repair.repair(src, {"function": "nope", "examples": [{"in": [1], "out": 1}]})
 
 
+class RepairV2Tests(unittest.TestCase):
+    """Fault localization + the widened mutation space."""
+
+    def test_fixes_wrong_variable_bug(self):
+        src = dedent(
+            """
+            def area(w, h):
+                return w * w
+            """
+        )
+        spec = {
+            "function": "area",
+            "examples": [{"in": [2, 3], "out": 6}, {"in": [4, 5], "out": 20}],
+        }
+        result = repair.repair(src, spec)
+        self.assertTrue(result.changed)
+        self.assertEqual(run(result.source, "area")(6, 7), 42)
+
+    def test_fixes_boolean_literal(self):
+        src = dedent(
+            """
+            def found(items, target):
+                hit = True
+                for item in items:
+                    if item == target:
+                        hit = True
+                return hit
+            """
+        )
+        spec = {
+            "function": "found",
+            "examples": [
+                {"in": [[1, 2], 2], "out": True},
+                {"in": [[1, 2], 9], "out": False},
+                {"in": [[], 1], "out": False},
+            ],
+        }
+        result = repair.repair(src, spec)
+        self.assertTrue(result.changed)
+        f = run(result.source, "found")
+        self.assertTrue(f([5, 6], 5))
+        self.assertFalse(f([5, 6], 7))
+
+    def test_fixes_augmented_assignment(self):
+        src = dedent(
+            """
+            def total(items):
+                acc = 0
+                for item in items:
+                    acc -= item
+                return acc
+            """
+        )
+        spec = {
+            "function": "total",
+            "examples": [{"in": [[1, 2, 3]], "out": 6}, {"in": [[]], "out": 0}],
+        }
+        result = repair.repair(src, spec)
+        self.assertTrue(result.changed)
+        self.assertEqual(run(result.source, "total")([10, 5]), 15)
+
+    def test_never_mutates_function_name(self):
+        # The only NAME token equal to the function name is the def itself;
+        # a repair must never rename the function to make tests "pass".
+        src = "def f(x):\n    return x + 2\n"
+        spec = {"function": "f", "examples": [{"in": [1], "out": 2}]}
+        result = repair.repair(src, spec)
+        self.assertIn("def f(", result.source)
+
+    def test_localization_finds_bug_among_many_sites(self):
+        # A larger function with plenty of mutable tokens; only one line is
+        # wrong. Localization should still converge (and deterministically).
+        src = dedent(
+            """
+            def stats(a, b, c):
+                low = min(a, b)
+                low = min(low, c)
+                high = max(a, b)
+                high = max(high, c)
+                spread = high + low
+                return spread
+            """
+        )
+        spec = {
+            "function": "stats",
+            "examples": [
+                {"in": [1, 5, 3], "out": 4},
+                {"in": [10, 2, 6], "out": 8},
+                {"in": [7, 7, 7], "out": 0},
+            ],
+        }
+        result = repair.repair(src, spec)
+        self.assertTrue(result.changed)
+        self.assertEqual(run(result.source, "stats")(1, 9, 4), 8)
+
+    def test_v2_deterministic(self):
+        src = "def area(w, h):\n    return w * w\n"
+        spec = {
+            "function": "area",
+            "examples": [{"in": [2, 3], "out": 6}, {"in": [4, 5], "out": 20}],
+        }
+        from detcode.determinism import content_hash
+        hashes = {content_hash(repair.repair(src, spec).source) for _ in range(10)}
+        self.assertEqual(len(hashes), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

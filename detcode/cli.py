@@ -14,7 +14,19 @@ import sys
 
 from . import cnl, planner
 from .determinism import TOOL_VERSION
-from .engines import document, explain, gentest, repair, retrieve, rewrite, scaffold, synth
+import os
+
+from .engines import (
+    builder,
+    document,
+    explain,
+    gentest,
+    repair,
+    retrieve,
+    rewrite,
+    scaffold,
+    synth,
+)
 
 
 class _EditResult:
@@ -137,6 +149,34 @@ def _cmd_gentest(args) -> int:
     return 0
 
 
+def _cmd_new(args) -> int:
+    project = builder.build(args.direction, name=args.name)
+    if args.dry_run:
+        print(f"project: {project.name} ({len(project.files)} files)")
+        print("decisions:")
+        for decision in project.report["decisions"]:
+            print(f"  - {decision}")
+        print("files:")
+        for f in project.files:
+            print(f"  {f.path}")
+        return 0
+
+    out_dir = args.out or project.name
+    # Never overwrite: check every target before writing anything.
+    for f in project.files:
+        target = os.path.join(out_dir, f.path.replace("/", os.sep))
+        if os.path.exists(target):
+            raise builder.BuildError(f"{target} already exists; refusing to overwrite")
+    for f in project.files:
+        target = os.path.join(out_dir, f.path.replace("/", os.sep))
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        _write(target, f.content)
+    print(f"{out_dir}: generated {len(project.files)} files ({project.name})", file=sys.stderr)
+    for decision in project.report["decisions"]:
+        print(f"  - {decision}", file=sys.stderr)
+    return 0
+
+
 def _cmd_do(args) -> int:
     intents = cnl.parse_all(args.command)
     before = _read(args.file) if args.file else None
@@ -230,6 +270,17 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--out", help="write the test module to this path (default: stdout)")
     gt.set_defaults(handler=_cmd_gentest)
 
+    nw = sub.add_parser(
+        "new", help='generate a project from a general direction, e.g. "resume tailorer"'
+    )
+    nw.add_argument("direction", help='e.g. "resume tailorer" or "teaching assistant app"')
+    nw.add_argument("--out", help="target directory (default: the derived package name)")
+    nw.add_argument("--name", help="override the derived package name")
+    nw.add_argument(
+        "--dry-run", action="store_true", help="print decisions and file list, write nothing"
+    )
+    nw.set_defaults(handler=_cmd_new)
+
     do = sub.add_parser(
         "do",
         help='run a controlled-natural-language command, e.g. "remove unused imports"',
@@ -259,6 +310,7 @@ def main(argv: list[str] | None = None) -> int:
         explain.ExplainError,
         gentest.SpecError,
         document.DocError,
+        builder.BuildError,
         cnl.CNLError,
         planner.UnknownIntent,
         planner.MissingSource,

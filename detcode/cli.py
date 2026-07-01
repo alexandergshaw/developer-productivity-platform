@@ -13,7 +13,7 @@ import json
 import sys
 
 from .determinism import TOOL_VERSION
-from .engines import rewrite, scaffold
+from .engines import rewrite, scaffold, synth
 
 
 def _read(path: str) -> str:
@@ -72,6 +72,21 @@ def _cmd_scaffold(args) -> int:
     return 0
 
 
+def _cmd_synth(args) -> int:
+    spec = json.loads(_read(args.examples))
+    if args.name:
+        spec["name"] = args.name
+    result = synth.synthesize(spec)
+    if args.out:
+        _write(args.out, result.source)
+        print(
+            f"{args.out}: synthesized {result.report.get('expr')}", file=sys.stderr
+        )
+    else:
+        sys.stdout.write(result.source)
+    return 0
+
+
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--file", required=True, help="Python source file to operate on")
     out = p.add_mutually_exclusive_group()
@@ -107,6 +122,14 @@ def build_parser() -> argparse.ArgumentParser:
     sc.add_argument("--out", help="write generated module to this path (default: stdout)")
     sc.set_defaults(handler=_cmd_scaffold)
 
+    sy = sub.add_parser(
+        "synth", help="synthesize a function from input/output examples"
+    )
+    sy.add_argument("--examples", required=True, help="JSON file of input/output examples")
+    sy.add_argument("--name", help="name for the synthesized function (default: f)")
+    sy.add_argument("--out", help="write the function to this path (default: stdout)")
+    sy.set_defaults(handler=_cmd_synth)
+
     return parser
 
 
@@ -115,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.handler(args)
-    except (rewrite.Unsafe, scaffold.SpecError) as exc:
+    except (rewrite.Unsafe, scaffold.SpecError, synth.SpecError, synth.NoSolution) as exc:
         print(f"detcode: refused: {exc}", file=sys.stderr)
         return 2
     except (OSError, SyntaxError, json.JSONDecodeError) as exc:

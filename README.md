@@ -52,9 +52,14 @@ detcode remove-unused-imports --file app.py --write
 
 # Generate a module of dataclasses/enums from a JSON spec
 detcode scaffold --spec examples/models.spec.json --out models.py
+
+# Synthesize a function from input/output examples
+detcode synth --examples examples/fullname.examples.json
+# -> def full_name(x0, x1):
+#        return (x0 + (' ' + x1))
 ```
 
-See [examples/models.spec.json](examples/models.spec.json) for the spec format.
+See [examples/](examples/) for the spec and example-set formats.
 
 - default: print transformed source to stdout
 - `--diff`: print a unified diff instead
@@ -80,7 +85,7 @@ Capabilities are added as self-contained verticals, in this order:
 
 1. **Refactors / codemods** — ✅ `rename-local`, `remove-unused-imports`
 2. **Scaffolding / codegen** — ✅ `scaffold` (dataclasses + enums from a JSON spec)
-3. **Example-driven synthesis** — small functions from I/O examples + types
+3. **Example-driven synthesis** — ✅ `synth` (bottom-up enumerative search over a typed DSL)
 4. **Bug-fix / repair** — fault-localize + constrained repair against a test
 
 The intent front-end evolves in parallel: I/O examples + types → structured

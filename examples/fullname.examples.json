@@ -1,0 +1,8 @@
+{
+  "name": "full_name",
+  "examples": [
+    { "in": ["ada", "lovelace"], "out": "ada lovelace" },
+    { "in": ["alan", "turing"], "out": "alan turing" },
+    { "in": ["grace", "hopper"], "out": "grace hopper" }
+  ]
+}

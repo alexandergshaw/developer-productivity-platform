@@ -25,9 +25,10 @@ class Pack:
 
 
 def registry() -> tuple[Pack, ...]:
-    from . import generic
+    from . import generic, resume_tailorer
 
     return (
+        resume_tailorer.PACK,
         generic.PACK,  # generic must stay last: it matches nothing and is the fallback
     )
 

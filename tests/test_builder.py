@@ -23,11 +23,20 @@ def materialize(project) -> str:
 
 
 def run_generated_tests(root: str, slug: str) -> unittest.TestResult:
-    """Import the generated project and run its own test suite in-process."""
+    """Import the generated project and run its own test suite in-process.
+
+    The generated test file is loaded under a unique module name so the
+    project's ``tests`` package never collides with detcode's own.
+    """
+    import importlib.util
+
     sys.path.insert(0, root)
     try:
-        loader = unittest.TestLoader()
-        suite = loader.discover(os.path.join(root, "tests"), top_level_dir=root)
+        test_file = os.path.join(root, "tests", f"test_{slug}.py")
+        spec = importlib.util.spec_from_file_location(f"generated_tests_{slug}", test_file)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        suite = unittest.TestLoader().loadTestsFromModule(module)
         result = unittest.TestResult()
         suite.run(result)
         return result
@@ -35,8 +44,7 @@ def run_generated_tests(root: str, slug: str) -> unittest.TestResult:
         sys.path.remove(root)
         for mod in [m for m in sys.modules if m == slug or m.startswith(slug + ".")]:
             del sys.modules[mod]
-        for mod in [m for m in sys.modules if m.startswith("tests.test_" + slug)]:
-            del sys.modules[mod]
+        sys.modules.pop(f"generated_tests_{slug}", None)
 
 
 class ElaborateTests(unittest.TestCase):

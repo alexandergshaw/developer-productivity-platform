@@ -94,12 +94,13 @@ See [examples/](examples/) for the spec, example-set, and repair-spec formats.
 
 ## Web playground (Vercel)
 
-A static playground UI ([index.html](index.html)) plus a Python serverless
-function ([api/run.py](api/run.py)) expose every engine over HTTP. detcode is
-stdlib-only, so there is nothing to install or configure:
+A static playground UI ([index.html](index.html)) served by a stdlib WSGI app
+([main.py](main.py) — the entrypoint Vercel's Python builder detects) exposes
+every engine over HTTP. detcode is stdlib-only, so there is nothing to install
+or configure:
 
 ```bash
-# local development (same service layer the deployment uses)
+# local development — runs the exact WSGI app Vercel deploys
 python devserver.py     # -> http://127.0.0.1:8000
 
 # deploy

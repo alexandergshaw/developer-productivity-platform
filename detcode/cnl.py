@@ -11,9 +11,21 @@ Supported commands::
     rename local <old> to <new> in <func>
     remove unused imports
     explain [<func>]
+    add a docstring to <func> / document [<func>]
     fix <func> so that <func>(args) == value [and ...]
     write a function <name> where <name>(args) == value [and ...]
     generate tests for <func> where <func>(args) == value [and ...]
+
+Three naturalness layers sit in front of the grammar, all fixed tables (no
+statistics, no guessing):
+
+- **fillers** are stripped: "please", "can you", trailing "thanks", ...
+- **synonyms** normalize to the canonical verb: make/create/build a function →
+  write a function; debug/repair → fix; delete/drop unused imports → remove;
+  "what does f do?" → explain f
+- **chaining**: commands joined by "then" run as a pipeline
+  ("remove unused imports then rename local total to acc in compute").
+  The split is quote-aware, so a "then" inside a string literal never splits.
 
 Conditions are real Python expressions (``area(2, 3) == 6 and area(1, 5) == 5``)
 parsed with ``ast`` — arguments and expected values must be literals.
@@ -156,6 +168,91 @@ _PATTERNS = (
 )
 
 
+# --------------------------------------------------------------------------- #
+# naturalness: fillers, synonyms, chaining
+# --------------------------------------------------------------------------- #
+_LEADING_FILLERS = re.compile(
+    r"^(?:please|kindly|hey|hi|now|also|and|just|can\s+you|could\s+you|"
+    r"would\s+you|will\s+you)\s+",
+    re.IGNORECASE,
+)
+_TRAILING_FILLERS = re.compile(
+    r"\s+(?:please|thanks|thank\s+you|for\s+me)$", re.IGNORECASE
+)
+
+# Fixed rewrite table mapping synonym phrasings onto the canonical grammar.
+_REWRITES = (
+    (re.compile(r"^(?:create|make|build|craft)\s+a\s+function\b", re.IGNORECASE), "write a function"),
+    (re.compile(r"^(?:create|make|build|write)\s+tests\s+for\b", re.IGNORECASE), "generate tests for"),
+    (re.compile(r"^(?:repair|debug|correct)\s+", re.IGNORECASE), "fix "),
+    (re.compile(r"^(?:delete|drop|strip|remove)\s+(?:the\s+)?unused\s+imports$", re.IGNORECASE), "remove unused imports"),
+    (re.compile(r"^(?:describe|summarize)\b", re.IGNORECASE), "explain"),
+    (re.compile(r"^what\s+does\s+(\w+)\s+do$", re.IGNORECASE), r"explain \1"),
+    (re.compile(r"^add\s+docstrings?$", re.IGNORECASE), "document"),
+    (re.compile(r"^(?:add\s+docstring\s+to|write\s+a\s+docstring\s+for)\s+", re.IGNORECASE), "add a docstring to "),
+)
+
+_CHAIN_VERBS = frozenset(
+    "write make create build craft fix repair debug correct remove delete drop "
+    "strip rename explain describe summarize document add generate".split()
+)
+
+
+def _normalize(text: str) -> str:
+    command = " ".join(text.strip().split())
+    command = command.rstrip("?!").rstrip()
+    while True:
+        stripped = _LEADING_FILLERS.sub("", command)
+        stripped = _TRAILING_FILLERS.sub("", stripped)
+        if stripped == command:
+            break
+        command = stripped
+    for pattern, replacement in _REWRITES:
+        rewritten = pattern.sub(replacement, command)
+        if rewritten != command:
+            command = rewritten
+            break
+    return command
+
+
+def _split_chain(text: str) -> list[str]:
+    """Split on the word "then" outside string literals, only where the next
+    segment starts with a known command verb."""
+    segments: list[str] = []
+    quote: str | None = None
+    start = i = 0
+    n = len(text)
+    while i < n:
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            i += 1
+            continue
+        if (
+            text[i : i + 4].lower() == "then"
+            and (i == 0 or text[i - 1].isspace())
+            and (i + 4 == n or text[i + 4].isspace())
+        ):
+            rest = _normalize(text[i + 4 :])
+            first_word = re.match(r"[A-Za-z]+", rest)
+            if first_word and first_word.group(0).lower() in _CHAIN_VERBS:
+                segments.append(text[start:i])
+                start = i + 4
+                i += 4
+                continue
+        i += 1
+    segments.append(text[start:])
+    return [s.strip(" ,") for s in segments if s.strip(" ,")]
+
+
 def _levenshtein(a: str, b: str) -> int:
     if len(a) < len(b):
         a, b = b, a
@@ -176,7 +273,7 @@ def _closest_form(command: str) -> str:
 
 
 def parse(text: str) -> Intent:
-    command = " ".join(text.strip().split())  # collapse whitespace
+    command = _normalize(text)
     for pattern, build in _PATTERNS:
         match = pattern.match(command)
         if match:
@@ -187,3 +284,8 @@ def parse(text: str) -> Intent:
         f"Closest supported form: {_closest_form(command)!r}\n"
         f"All supported commands:\n  {supported}"
     )
+
+
+def parse_all(text: str) -> list[Intent]:
+    """Parse a possibly-chained command ("... then ...") into a pipeline."""
+    return [parse(segment) for segment in _split_chain(text)]

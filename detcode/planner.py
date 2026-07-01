@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from .determinism import provenance
 from .ir import Intent
 from .engines import document, explain, gentest, repair, retrieve, rewrite, scaffold
 
@@ -96,3 +97,32 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
         return Outcome(None, r.source, False, r.report)
 
     raise UnknownIntent(f"no engine for operation {op!r}")
+
+
+def run_all(intents: list[Intent], source: str | None = None) -> Outcome:
+    """Run a pipeline of intents ("... then ...").
+
+    File edits feed forward: each step sees the previous step's edited source.
+    Freestanding outputs (generated code, explanations) accumulate in order.
+    """
+    if len(intents) == 1:
+        return run(intents[0], source)
+
+    current = source
+    outputs: list[str] = []
+    reports: list[dict] = []
+    edited = False
+    for intent in intents:
+        outcome = run(intent, current)
+        reports.append(outcome.report)
+        if outcome.new_source is not None:
+            current = outcome.new_source
+            edited = edited or outcome.changed
+        if outcome.output:
+            outputs.append(outcome.output)
+    return Outcome(
+        current if edited else None,
+        "\n\n".join(outputs) if outputs else None,
+        edited,
+        provenance("pipeline", "1", steps=reports),
+    )

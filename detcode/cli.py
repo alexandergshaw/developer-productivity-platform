@@ -132,18 +132,20 @@ def _cmd_gentest(args) -> int:
 
 
 def _cmd_do(args) -> int:
-    intent = cnl.parse(args.command)
+    intents = cnl.parse_all(args.command)
     before = _read(args.file) if args.file else None
-    outcome = planner.run(intent, before)
+    outcome = planner.run_all(intents, before)
+    status = 0
     if outcome.new_source is not None:
-        return _emit(args, args.file, before, _EditResult(outcome))
-    if args.diff or args.write:
+        status = _emit(args, args.file, before, _EditResult(outcome))
+    elif args.diff or args.write:
         print(
             "detcode: this command generates new content; printing to stdout",
             file=sys.stderr,
         )
-    print(outcome.output or "")
-    return 0
+    if outcome.output:
+        print(outcome.output)
+    return status
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:

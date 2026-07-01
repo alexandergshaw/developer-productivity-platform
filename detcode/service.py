@@ -60,11 +60,15 @@ def run_request(req) -> dict:
     tool = req.get("tool")
     try:
         if tool == "do":
-            intent = cnl.parse(str(req.get("command") or ""))
-            outcome = planner.run(intent, req.get("source"))
+            intents = cnl.parse_all(str(req.get("command") or ""))
+            outcome = planner.run_all(intents, req.get("source"))
             if outcome.new_source is not None:
-                return _edit(outcome.new_source, outcome.changed, outcome.report)
-            kind = _text if intent.operation == "explain" else _generated
+                resp = _edit(outcome.new_source, outcome.changed, outcome.report)
+                if outcome.output:  # a chain can both edit and generate
+                    resp["text"] = outcome.output
+                return resp
+            explain_only = all(i.operation == "explain" for i in intents)
+            kind = _text if explain_only else _generated
             return kind(outcome.output or "", outcome.report)
         if tool == "synth":
             r = retrieve.write_function(req.get("spec") or {})

@@ -91,6 +91,77 @@ class CNLv2Tests(unittest.TestCase):
         self.assertEqual(spec["examples"], [{"in": [-3], "out": 3}])
 
 
+class NaturalnessTests(unittest.TestCase):
+    """Fillers, synonyms, and chained commands."""
+
+    def test_fillers_stripped(self):
+        intent = cnl.parse("please can you remove unused imports thanks")
+        self.assertEqual(intent.operation, "remove-unused-imports")
+
+    def test_synonyms_normalize(self):
+        self.assertEqual(
+            cnl.parse("make a function double where double(2) == 4").operation, "synth"
+        )
+        self.assertEqual(
+            cnl.parse("debug area so that area(2, 3) == 6").operation, "repair"
+        )
+        self.assertEqual(cnl.parse("delete unused imports").operation, "remove-unused-imports")
+        self.assertEqual(cnl.parse("describe compute").operation, "explain")
+
+    def test_what_does_x_do(self):
+        intent = cnl.parse("what does compute do?")
+        self.assertEqual(intent.operation, "explain")
+        self.assertEqual(intent.get("func"), "compute")
+
+    def test_chain_splits_on_then(self):
+        intents = cnl.parse_all(
+            "remove unused imports then rename local total to acc in compute"
+        )
+        self.assertEqual(
+            [i.operation for i in intents], ["remove-unused-imports", "rename-local"]
+        )
+
+    def test_then_inside_string_literal_does_not_split(self):
+        intents = cnl.parse_all(
+            'write a function shout where shout("stop then go") == "STOP THEN GO"'
+        )
+        self.assertEqual(len(intents), 1)
+        import json
+        spec = json.loads(intents[0].get("spec_json"))
+        self.assertEqual(spec["examples"][0]["in"], ["stop then go"])
+
+    def test_pipeline_edits_feed_forward(self):
+        src = dedent(
+            """
+            import os
+            import sys
+
+
+            def compute(a):
+                total = a + 1
+                return total
+
+
+            print(sys.argv)
+            """
+        )
+        intents = cnl.parse_all(
+            "remove unused imports then rename local total to acc in compute"
+        )
+        outcome = planner.run_all(intents, src)
+        self.assertNotIn("import os", outcome.new_source)
+        self.assertIn("acc = a + 1", outcome.new_source)
+        self.assertEqual(outcome.report["rule"], "pipeline")
+        self.assertEqual(len(outcome.report["steps"]), 2)
+
+    def test_pipeline_mixing_edit_and_text(self):
+        src = "import os\n\n\ndef f(x):\n    return x\n"
+        intents = cnl.parse_all("remove unused imports then explain f")
+        outcome = planner.run_all(intents, src)
+        self.assertNotIn("import os", outcome.new_source)
+        self.assertIn("def f(x)", outcome.output)
+
+
 class PlannerTests(unittest.TestCase):
     def test_routes_rename_through_full_seam(self):
         src = dedent(

@@ -12,6 +12,9 @@ first-class, deterministic outcome — never a wrong edit made silently.
 from __future__ import annotations
 
 import ast
+import io
+import sys
+import tokenize
 from dataclasses import dataclass
 
 from ..determinism import provenance
@@ -263,3 +266,99 @@ def _import_kwargs(node, names):
     if isinstance(node, ast.Import):
         return {"names": names}
     return {"module": node.module, "names": names, "level": node.level}
+
+
+# --------------------------------------------------------------------------- #
+# sort_imports
+# --------------------------------------------------------------------------- #
+def _import_units(node) -> list[tuple[int, str, str]]:
+    """Break an import statement into sortable (group, root, rendered) units.
+
+    Groups: 0 = __future__, 1 = stdlib, 2 = third-party/local absolute,
+    3 = relative. ``import a, b`` splits into one unit per module (isort
+    style); ``from x import b, a`` gets its names sorted.
+    """
+
+    def group_of(root: str, level: int, future: bool) -> int:
+        if future:
+            return 0
+        if level > 0:
+            return 3
+        return 1 if root in sys.stdlib_module_names else 2
+
+    if isinstance(node, ast.Import):
+        units = []
+        for alias in node.names:
+            root = alias.name.split(".", 1)[0]
+            rendered = ast.unparse(ast.Import(names=[alias]))
+            units.append((group_of(root, 0, False), root, rendered))
+        return units
+
+    future = node.module == "__future__" and node.level == 0
+    if any(alias.name == "*" for alias in node.names):
+        names = list(node.names)  # never reorder around a star import
+    else:
+        names = sorted(node.names, key=lambda a: (a.name.lower(), a.name, a.asname or ""))
+    rendered = ast.unparse(ast.ImportFrom(module=node.module, names=names, level=node.level))
+    root = "" if node.level else (node.module or "").split(".", 1)[0]
+    return [(group_of(root, node.level, future), root, rendered)]
+
+
+def sort_imports(source: str) -> Result:
+    """Canonically order the leading import block (isort-lite).
+
+    Groups — __future__, standard library, third-party/local, relative —
+    separated by a blank line, alphabetical within each. Only the contiguous
+    import block at the top of the module (after the docstring) is touched.
+    Refuses if that block contains comments, which reordering would misplace.
+    """
+    tree = ast.parse(source)
+    body = tree.body
+    start_index = 0
+    if (
+        body
+        and isinstance(body[0], ast.Expr)
+        and isinstance(body[0].value, ast.Constant)
+        and isinstance(body[0].value.value, str)
+    ):
+        start_index = 1
+
+    block: list = []
+    for node in body[start_index:]:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            block.append(node)
+        else:
+            break
+    if len(block) < 2:
+        return Result(source, False, provenance("sort_imports", RULE_VERSION, statements=0))
+
+    first, last = block[0], block[-1]
+    for tok in tokenize.generate_tokens(io.StringIO(source).readline):
+        if tok.type == tokenize.COMMENT and first.lineno <= tok.start[0] <= last.end_lineno:
+            raise Unsafe(
+                "the import block contains comments; reordering would misplace them"
+            )
+
+    units = sorted(
+        {unit for node in block for unit in _import_units(node)},
+        key=lambda u: (u[0], u[1].lower(), u[2]),
+    )
+    grouped: list[str] = []
+    previous_group: int | None = None
+    for group, _root, rendered in units:
+        if previous_group is not None and group != previous_group:
+            grouped.append("")
+        grouped.append(rendered)
+        previous_group = group
+    new_block = "\n".join(grouped)
+
+    lines = source.splitlines(keepends=True)
+    last_line = lines[last.end_lineno - 1]
+    edit = TextEdit(
+        first.lineno, 0, last.end_lineno, len(last_line.rstrip("\r\n").encode("utf-8")), new_block
+    )
+    new_source = apply_edits(source, [edit])
+    ast.parse(new_source)
+
+    report = provenance("sort_imports", RULE_VERSION, statements=len(units))
+    return Result(new_source, changed=new_source != source, report=report)

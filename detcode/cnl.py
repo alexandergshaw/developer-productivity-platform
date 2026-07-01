@@ -41,6 +41,8 @@ from .ir import Intent
 GRAMMAR = (
     "rename local <old> to <new> in <func>",
     "remove unused imports",
+    "sort imports",
+    "clean up",
     "explain <func>",
     "explain",
     "add a docstring to <func>",
@@ -121,6 +123,14 @@ _PATTERNS = (
         lambda m: Intent.of("remove-unused-imports"),
     ),
     (
+        re.compile(r"^sort\s+(?:the\s+)?imports$", re.IGNORECASE),
+        lambda m: Intent.of("sort-imports"),
+    ),
+    (
+        re.compile(r"^(?:clean\s*up|tidy\s*up|tidy)(?:\s+(?:this|the)\s+(?:file|code))?$", re.IGNORECASE),
+        lambda m: Intent.of("cleanup"),
+    ),
+    (
         re.compile(r"^explain\s+(?P<func>\w+)$", re.IGNORECASE),
         lambda m: Intent.of("explain", func=m["func"]),
     ),
@@ -194,7 +204,7 @@ _REWRITES = (
 
 _CHAIN_VERBS = frozenset(
     "write make create build craft fix repair debug correct remove delete drop "
-    "strip rename explain describe summarize document add generate".split()
+    "strip rename explain describe summarize document add generate sort clean tidy".split()
 )
 
 

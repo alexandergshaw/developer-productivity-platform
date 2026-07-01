@@ -157,5 +157,85 @@ class RemoveUnusedImportsTests(unittest.TestCase):
         self.assertNotIn("import os", result.source)
 
 
+class SortImportsTests(unittest.TestCase):
+    def test_groups_and_alphabetizes(self):
+        src = dedent(
+            """
+            import sys
+            import requests
+            from __future__ import annotations
+            import os
+
+            print(os, sys, requests)
+            """
+        )
+        result = rewrite.sort_imports(src)
+        expected = dedent(
+            """
+            from __future__ import annotations
+
+            import os
+            import sys
+
+            import requests
+
+            print(os, sys, requests)
+            """
+        )
+        self.assertEqual(result.source, expected)
+        self.assertTrue(result.changed)
+
+    def test_splits_multi_imports_and_sorts_from_names(self):
+        src = "import sys, os\nfrom typing import Optional, Any\n\nprint(os, sys, Any, Optional)\n"
+        result = rewrite.sort_imports(src)
+        self.assertIn("import os\nimport sys", result.source)
+        self.assertIn("from typing import Any, Optional", result.source)
+
+    def test_docstring_stays_on_top(self):
+        src = '"""Module doc."""\nimport sys\nimport os\n\nprint(os, sys)\n'
+        result = rewrite.sort_imports(src)
+        self.assertTrue(result.source.startswith('"""Module doc."""\nimport os\nimport sys'))
+
+    def test_refuses_comments_in_block(self):
+        src = "import sys\n# needed for legacy reasons\nimport os\n\nprint(os, sys)\n"
+        with self.assertRaises(Unsafe):
+            rewrite.sort_imports(src)
+
+    def test_idempotent(self):
+        src = "import sys\nimport os\n\nprint(os, sys)\n"
+        once = rewrite.sort_imports(src)
+        twice = rewrite.sort_imports(once.source)
+        self.assertEqual(once.source, twice.source)
+        self.assertFalse(twice.changed)
+
+    def test_single_import_untouched(self):
+        src = "import os\n\nprint(os)\n"
+        result = rewrite.sort_imports(src)
+        self.assertFalse(result.changed)
+
+
+class CleanupTests(unittest.TestCase):
+    def test_cleanup_composite_via_english(self):
+        from detcode import cnl, planner
+        src = dedent(
+            """
+            import sys
+            import unused_thing
+            import os
+
+            print(os.sep, sys.argv)
+            """
+        )
+        outcome = planner.run(cnl.parse("clean up"), src)
+        self.assertNotIn("unused_thing", outcome.new_source)
+        self.assertTrue(outcome.new_source.startswith("import os\nimport sys"))
+        self.assertEqual(outcome.report["rule"], "cleanup")
+
+    def test_tidy_synonym(self):
+        from detcode import cnl
+        self.assertEqual(cnl.parse("tidy up this file").operation, "cleanup")
+        self.assertEqual(cnl.parse("sort the imports").operation, "sort-imports")
+
+
 if __name__ == "__main__":
     unittest.main()

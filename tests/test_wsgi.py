@@ -61,6 +61,12 @@ class WsgiTests(unittest.TestCase):
         status, _, _ = call("GET", "/nope")
         self.assertEqual(status, "404 Not Found")
 
+    def test_head_has_headers_but_no_body(self):
+        status, headers, body = call("HEAD", "/")
+        self.assertEqual(status, "200 OK")
+        self.assertGreater(int(headers["Content-Length"]), 0)
+        self.assertEqual(body, b"")  # a body on HEAD corrupts keep-alive
+
 
 if __name__ == "__main__":
     unittest.main()

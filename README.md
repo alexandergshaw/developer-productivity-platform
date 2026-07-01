@@ -132,23 +132,31 @@ pure function of an `Intent` plus source. Edits are span-based
 
 ## Capabilities
 
-All verticals from the original roadmap are landed, plus the second-wave
-"mimic the LLM" review items:
-
-1. **Refactors / codemods** — `rename-local`, `remove-unused-imports`
+1. **Refactors / codemods** — `rename-local`, `remove-unused-imports`,
+   `sort-imports` (isort-lite), and the `clean up` composite
 2. **Scaffolding / codegen** — `scaffold` (dataclasses + enums from a JSON spec)
-3. **Example-driven synthesis** — `synth`: bottom-up enumerative search over a
-   45-component typed DSL (ints, strings, booleans, lists, conditionals) with
-   deterministic constant mining from the examples
+3. **Function writing** — retrieval-first: a corpus of 27 hand-verified
+   classic functions (is_prime, fibonacci, gcd, binary_search, ...) matched
+   against your examples — examples are the oracle — with fallback to `synth`,
+   bottom-up enumerative search over a 45-component typed DSL (ints, strings,
+   booleans, lists, conditionals) with deterministic constant mining
 4. **Bug-fix / repair** — `repair`: spectrum-based fault localization ranks
    suspicious lines, then token-level mutation search (operators, constants,
    boolean literals, augmented assignments, wrong-variable swaps) with the
    test suite as the oracle
 5. **Code explanation** — `explain`: AST-derived structural summaries through
    fixed English templates
-6. **Test generation** — `gentest`: examples → a runnable unittest module
-7. **English interface** — `do`: a controlled natural language covering every
-   engine, with "did you mean" refusals
+6. **Test generation** — `gentest`: examples → a runnable unittest module,
+   plus deterministic edge cases: branch boundaries mined from comparisons,
+   type-based probes, exception pinning via assertRaises, each probe bounded
+   by a line-count budget
+7. **Docstring generation** — `document`: name-derived summaries plus
+   Args/Returns/Yields/Raises read off the AST; never overwrites, idempotent
+8. **English interface** — `do`: a controlled natural language covering every
+   engine, with filler stripping ("please ... thanks"), synonym normalization
+   (make/build → write, debug → fix, "what does f do?" → explain f), "did you
+   mean" refusals, and quote-aware chaining ("remove unused imports then
+   rename local total to acc in compute")
 
 Every front-end compiles to an `Intent` (`ir.py`) dispatched by `planner.py`;
 the same seam serves the CLI, the CNL, and the web API (`service.py`).

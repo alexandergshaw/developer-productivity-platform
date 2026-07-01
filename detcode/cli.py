@@ -106,6 +106,12 @@ def _cmd_repair(args) -> int:
     return _emit(args, args.file, before, result)
 
 
+def _cmd_sort_imports(args) -> int:
+    before = _read(args.file)
+    result = rewrite.sort_imports(before)
+    return _emit(args, args.file, before, result)
+
+
 def _cmd_document(args) -> int:
     before = _read(args.file)
     result = document.add_docstrings(before, args.func)
@@ -199,6 +205,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--spec", required=True, help="JSON spec: function name, examples, max_edits"
     )
     rp.set_defaults(handler=_cmd_repair)
+
+    si = sub.add_parser("sort-imports", help="canonically order the import block")
+    _add_common(si)
+    si.set_defaults(handler=_cmd_sort_imports)
 
     dc = sub.add_parser(
         "document", help="insert generated docstrings (functions lacking one)"

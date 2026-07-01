@@ -23,47 +23,47 @@ USAGE = {
 }
 
 
-def _json_response(start_response, status: str, payload: dict) -> list[bytes]:
-    body = json.dumps(payload).encode("utf-8")
+def _respond(start_response, status: str, content_type: str, body: bytes, head: bool) -> list[bytes]:
+    # Content-Length always reflects the body, but a HEAD response must not
+    # carry one — stray bytes corrupt keep-alive connections.
     start_response(
-        status,
-        [("Content-Type", "application/json; charset=utf-8"), ("Content-Length", str(len(body)))],
+        status, [("Content-Type", content_type), ("Content-Length", str(len(body)))]
     )
-    return [body]
-
-
-def _html_response(start_response, text: str) -> list[bytes]:
-    body = text.encode("utf-8")
-    start_response(
-        "200 OK",
-        [("Content-Type", "text/html; charset=utf-8"), ("Content-Length", str(len(body)))],
-    )
-    return [body]
+    return [] if head else [body]
 
 
 def app(environ, start_response) -> list[bytes]:
     method = environ.get("REQUEST_METHOD", "GET")
+    head = method == "HEAD"
     path = (environ.get("PATH_INFO") or "/").rstrip("/") or "/"
+
+    def json_response(status: str, payload: dict) -> list[bytes]:
+        return _respond(
+            start_response,
+            status,
+            "application/json; charset=utf-8",
+            json.dumps(payload).encode("utf-8"),
+            head,
+        )
 
     if path == "/api/run":
         if method != "POST":
-            return _json_response(start_response, "200 OK", USAGE)
+            return json_response("200 OK", USAGE)
         try:
             length = int(environ.get("CONTENT_LENGTH") or 0)
             raw = environ["wsgi.input"].read(length) if length else b"{}"
             request = json.loads(raw or b"{}")
         except (ValueError, json.JSONDecodeError):
-            return _json_response(
-                start_response,
+            return json_response(
                 "400 Bad Request",
                 {"ok": False, "refused": False, "error": "body must be valid JSON"},
             )
-        return _json_response(start_response, "200 OK", run_request(request))
+        return json_response("200 OK", run_request(request))
 
     if path in ("/", "/index.html") and method in ("GET", "HEAD"):
-        with open(os.path.join(ROOT, "index.html"), "r", encoding="utf-8") as fh:
-            return _html_response(start_response, fh.read())
+        with open(os.path.join(ROOT, "index.html"), "rb") as fh:
+            return _respond(start_response, "200 OK", "text/html; charset=utf-8", fh.read(), head)
 
-    return _json_response(
-        start_response, "404 Not Found", {"ok": False, "refused": False, "error": "not found"}
+    return json_response(
+        "404 Not Found", {"ok": False, "refused": False, "error": "not found"}
     )

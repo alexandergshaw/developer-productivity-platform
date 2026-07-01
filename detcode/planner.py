@@ -65,6 +65,21 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
         r = rewrite.remove_unused_imports(_needs_source(intent, source))
         return Outcome(r.source, None, r.changed, r.report)
 
+    if op == "sort-imports":
+        r = rewrite.sort_imports(_needs_source(intent, source))
+        return Outcome(r.source, None, r.changed, r.report)
+
+    if op == "cleanup":
+        # The LLM "tidy this file" move: drop unused imports, then sort.
+        r1 = rewrite.remove_unused_imports(_needs_source(intent, source))
+        r2 = rewrite.sort_imports(r1.source)
+        return Outcome(
+            r2.source,
+            None,
+            r1.changed or r2.changed,
+            provenance("cleanup", "1", steps=[r1.report, r2.report]),
+        )
+
     if op == "explain":
         r = explain.explain(_needs_source(intent, source), intent.get("func"))
         return Outcome(None, r.text, False, r.report)

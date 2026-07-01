@@ -14,7 +14,16 @@ import sys
 
 from . import cnl, planner
 from .determinism import TOOL_VERSION
-from .engines import explain, repair, rewrite, scaffold, synth
+from .engines import explain, gentest, repair, rewrite, scaffold, synth
+
+
+class _EditResult:
+    """Adapter so planner Outcomes flow through the shared _emit path."""
+
+    def __init__(self, outcome):
+        self.source = outcome.new_source
+        self.changed = outcome.changed
+        self.report = outcome.report
 
 
 def _read(path: str) -> str:
@@ -103,11 +112,32 @@ def _cmd_explain(args) -> int:
     return 0
 
 
+def _cmd_gentest(args) -> int:
+    spec = json.loads(_read(args.spec))
+    if args.file and "source" not in spec and "module" not in spec:
+        spec["source"] = _read(args.file)
+    result = gentest.gentest(spec)
+    if args.out:
+        _write(args.out, result.source)
+        print(f"{args.out}: generated {result.report.get('cases')} tests", file=sys.stderr)
+    else:
+        sys.stdout.write(result.source)
+    return 0
+
+
 def _cmd_do(args) -> int:
     intent = cnl.parse(args.command)
-    before = _read(args.file)
-    result = planner.run(intent, before)
-    return _emit(args, args.file, before, result)
+    before = _read(args.file) if args.file else None
+    outcome = planner.run(intent, before)
+    if outcome.new_source is not None:
+        return _emit(args, args.file, before, _EditResult(outcome))
+    if args.diff or args.write:
+        print(
+            "detcode: this command generates new content; printing to stdout",
+            file=sys.stderr,
+        )
+    print(outcome.output or "")
+    return 0
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -167,12 +197,23 @@ def build_parser() -> argparse.ArgumentParser:
     ex.add_argument("--func", help="function to explain (default: whole module)")
     ex.set_defaults(handler=_cmd_explain)
 
+    gt = sub.add_parser(
+        "gentest", help="generate a unittest module from input/output examples"
+    )
+    gt.add_argument("--spec", required=True, help="JSON spec: function, examples, source|module")
+    gt.add_argument("--file", help="embed this file as the code under test")
+    gt.add_argument("--out", help="write the test module to this path (default: stdout)")
+    gt.set_defaults(handler=_cmd_gentest)
+
     do = sub.add_parser(
         "do",
         help='run a controlled-natural-language command, e.g. "remove unused imports"',
     )
-    _add_common(do)
-    do.add_argument("command", help='e.g. "rename local total to acc in compute"')
+    do.add_argument("command", help='e.g. "write a function double where double(2) == 4"')
+    do.add_argument("--file", help="Python source file (needed by file-editing commands)")
+    out = do.add_mutually_exclusive_group()
+    out.add_argument("--write", action="store_true", help="edit the file in place")
+    out.add_argument("--diff", action="store_true", help="print a unified diff")
     do.set_defaults(handler=_cmd_do)
 
     return parser
@@ -191,8 +232,10 @@ def main(argv: list[str] | None = None) -> int:
         repair.SpecError,
         repair.NoRepair,
         explain.ExplainError,
+        gentest.SpecError,
         cnl.CNLError,
         planner.UnknownIntent,
+        planner.MissingSource,
     ) as exc:
         print(f"detcode: refused: {exc}", file=sys.stderr)
         return 2

@@ -14,7 +14,7 @@ import sys
 
 from . import cnl, planner
 from .determinism import TOOL_VERSION
-from .engines import repair, rewrite, scaffold, synth
+from .engines import explain, repair, rewrite, scaffold, synth
 
 
 def _read(path: str) -> str:
@@ -97,6 +97,12 @@ def _cmd_repair(args) -> int:
     return _emit(args, args.file, before, result)
 
 
+def _cmd_explain(args) -> int:
+    result = explain.explain(_read(args.file), args.func)
+    print(result.text)
+    return 0
+
+
 def _cmd_do(args) -> int:
     intent = cnl.parse(args.command)
     before = _read(args.file)
@@ -156,6 +162,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rp.set_defaults(handler=_cmd_repair)
 
+    ex = sub.add_parser("explain", help="explain a function or module (AST-derived)")
+    ex.add_argument("--file", required=True, help="Python source file")
+    ex.add_argument("--func", help="function to explain (default: whole module)")
+    ex.set_defaults(handler=_cmd_explain)
+
     do = sub.add_parser(
         "do",
         help='run a controlled-natural-language command, e.g. "remove unused imports"',
@@ -179,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         synth.NoSolution,
         repair.SpecError,
         repair.NoRepair,
+        explain.ExplainError,
         cnl.CNLError,
         planner.UnknownIntent,
     ) as exc:

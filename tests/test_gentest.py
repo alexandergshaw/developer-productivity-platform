@@ -21,7 +21,7 @@ class GentestTests(unittest.TestCase):
         suite = loader.loadTestsFromTestCase(namespace["TestArea"])
         result = unittest.TestResult()
         suite.run(result)
-        self.assertEqual(result.testsRun, 2)
+        self.assertGreaterEqual(result.testsRun, 2)  # 2 examples + edge cases
         self.assertEqual(result.failures, [])
         self.assertEqual(result.errors, [])
 
@@ -58,6 +58,72 @@ class GentestTests(unittest.TestCase):
         }
         with self.assertRaises(SpecError):
             gentest.gentest(spec)
+
+
+class EdgeCaseTests(unittest.TestCase):
+    DIV_SPEC = {
+        "function": "per_unit",
+        "source": "def per_unit(total, count):\n    return total // count\n",
+        "examples": [{"in": [10, 2], "out": 5}],
+    }
+
+    def test_boundary_probes_from_comparisons(self):
+        spec = {
+            "function": "grade",
+            "source": (
+                "def grade(score):\n"
+                "    if score < 50:\n"
+                "        return 'fail'\n"
+                "    return 'pass'\n"
+            ),
+            "examples": [{"in": [80], "out": "pass"}],
+        }
+        generated = gentest.gentest(spec).source
+        # 49/50/51 come from the `score < 50` comparison.
+        self.assertIn("self.assertEqual(grade(49), 'fail')", generated)
+        self.assertIn("self.assertEqual(grade(50), 'pass')", generated)
+
+    def test_exception_probe_becomes_assert_raises(self):
+        generated = gentest.gentest(self.DIV_SPEC).source
+        # count=0 probe divides by zero — pinned as assertRaises.
+        self.assertIn("with self.assertRaises(ZeroDivisionError):", generated)
+        self.assertIn("per_unit(10, 0)", generated)
+
+    def test_generated_edge_tests_pass(self):
+        generated = gentest.gentest(self.DIV_SPEC).source
+        namespace = {"__name__": "generated_tests"}
+        exec(compile(generated, "<gentest>", "exec"), namespace)
+        suite = unittest.TestLoader().loadTestsFromTestCase(namespace["TestPerUnit"])
+        result = unittest.TestResult()
+        suite.run(result)
+        self.assertGreater(result.testsRun, 1)  # examples + edge cases
+        self.assertEqual(result.failures, [])
+        self.assertEqual(result.errors, [])
+
+    def test_edge_cases_can_be_disabled(self):
+        spec = dict(self.DIV_SPEC, edge_cases=False)
+        generated = gentest.gentest(spec).source
+        self.assertNotIn("_edge_", generated)
+
+    def test_infinite_loop_probe_is_discarded(self):
+        # n=-1 would loop forever; the line budget discards it deterministically.
+        spec = {
+            "function": "countdown",
+            "source": (
+                "def countdown(n):\n"
+                "    while n != 0:\n"
+                "        n -= 1\n"
+                "    return 'done'\n"
+            ),
+            "examples": [{"in": [3], "out": "done"}],
+        }
+        generated = gentest.gentest(spec).source
+        self.assertNotIn("countdown(-1)", generated)
+        self.assertIn("countdown(0)", generated)  # safe probe survives
+
+    def test_deterministic_with_edges(self):
+        hashes = {content_hash(gentest.gentest(self.DIV_SPEC).source) for _ in range(10)}
+        self.assertEqual(len(hashes), 1)
 
 
 if __name__ == "__main__":

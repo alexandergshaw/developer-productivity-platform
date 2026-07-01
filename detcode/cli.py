@@ -13,7 +13,7 @@ import json
 import sys
 
 from .determinism import TOOL_VERSION
-from .engines import rewrite, scaffold, synth
+from .engines import repair, rewrite, scaffold, synth
 
 
 def _read(path: str) -> str:
@@ -87,6 +87,13 @@ def _cmd_synth(args) -> int:
     return 0
 
 
+def _cmd_repair(args) -> int:
+    before = _read(args.file)
+    spec = json.loads(_read(args.spec))
+    result = repair.repair(before, spec)
+    return _emit(args, args.file, before, result)
+
+
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--file", required=True, help="Python source file to operate on")
     out = p.add_mutually_exclusive_group()
@@ -130,6 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--out", help="write the function to this path (default: stdout)")
     sy.set_defaults(handler=_cmd_synth)
 
+    rp = sub.add_parser(
+        "repair", help="repair a buggy function so it passes input/output tests"
+    )
+    _add_common(rp)
+    rp.add_argument(
+        "--spec", required=True, help="JSON spec: function name, examples, max_edits"
+    )
+    rp.set_defaults(handler=_cmd_repair)
+
     return parser
 
 
@@ -138,7 +154,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.handler(args)
-    except (rewrite.Unsafe, scaffold.SpecError, synth.SpecError, synth.NoSolution) as exc:
+    except (
+        rewrite.Unsafe,
+        scaffold.SpecError,
+        synth.SpecError,
+        synth.NoSolution,
+        repair.SpecError,
+        repair.NoRepair,
+    ) as exc:
         print(f"detcode: refused: {exc}", file=sys.stderr)
         return 2
     except (OSError, SyntaxError, json.JSONDecodeError) as exc:

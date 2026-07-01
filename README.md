@@ -57,9 +57,14 @@ detcode scaffold --spec examples/models.spec.json --out models.py
 detcode synth --examples examples/fullname.examples.json
 # -> def full_name(x0, x1):
 #        return (x0 + (' ' + x1))
+
+# Repair a buggy function until it passes input/output tests
+detcode repair --file examples/buggy_area.py --spec examples/buggy_area.repair.json --diff
+# -    return width + height
+# +    return width * height
 ```
 
-See [examples/](examples/) for the spec and example-set formats.
+See [examples/](examples/) for the spec, example-set, and repair-spec formats.
 
 - default: print transformed source to stdout
 - `--diff`: print a unified diff instead
@@ -86,10 +91,11 @@ Capabilities are added as self-contained verticals, in this order:
 1. **Refactors / codemods** — ✅ `rename-local`, `remove-unused-imports`
 2. **Scaffolding / codegen** — ✅ `scaffold` (dataclasses + enums from a JSON spec)
 3. **Example-driven synthesis** — ✅ `synth` (bottom-up enumerative search over a typed DSL)
-4. **Bug-fix / repair** — fault-localize + constrained repair against a test
+4. **Bug-fix / repair** — ✅ `repair` (token-level mutation search, tests as the oracle)
 
-The intent front-end evolves in parallel: I/O examples + types → structured
-spec/DSL → controlled natural language.
+The intent front-end evolves in parallel: I/O examples + types (`synth`) →
+structured spec/DSL (`scaffold`) → controlled natural language (next: a thin
+deterministic grammar over the existing engines).
 
 ## Development
 

@@ -43,6 +43,26 @@ Requires Python 3.10+. No third-party dependencies.
 
 ## Usage
 
+The fastest way in is the English interface:
+
+```bash
+# English -> synthesized code (no file needed)
+detcode do "write a function double where double(2) == 4 and double(5) == 10"
+
+# English -> verified bug fix
+detcode do "fix area so that area(2, 3) == 6 and area(4, 5) == 20" --file app.py --diff
+
+# English -> explanation / tests / refactors
+detcode do "explain area" --file app.py
+detcode do "generate tests for area where area(2, 3) == 6" --file app.py
+detcode do "rename local total to acc in compute" --file app.py --write
+```
+
+Unrecognized commands are refused with the closest supported form
+(deterministic edit distance) — never guessed at.
+
+Each capability also has a direct subcommand:
+
 ```bash
 # Rename a local variable inside one function (preserves comments & formatting)
 detcode rename-local --file app.py --func compute --from total --to accumulator --diff
@@ -63,12 +83,33 @@ detcode repair --file examples/buggy_area.py --spec examples/buggy_area.repair.j
 # -    return width + height
 # +    return width * height
 
-# Or drive the engines with a controlled-natural-language command
-detcode do "rename local total to acc in compute" --file app.py --diff
-detcode do "remove unused imports" --file app.py --write
+# Explain a function or module (AST-derived, never invented)
+detcode explain --file app.py --func apply_discount
+
+# Generate a runnable unittest module from examples
+detcode gentest --spec tests.spec.json --file app.py --out test_app.py
 ```
 
 See [examples/](examples/) for the spec, example-set, and repair-spec formats.
+
+## Web playground (Vercel)
+
+A static playground UI ([index.html](index.html)) plus a Python serverless
+function ([api/run.py](api/run.py)) expose every engine over HTTP. detcode is
+stdlib-only, so there is nothing to install or configure:
+
+```bash
+# local development (same service layer the deployment uses)
+python devserver.py     # -> http://127.0.0.1:8000
+
+# deploy
+vercel deploy           # or push the repo and import it at vercel.com/new
+```
+
+`POST /api/run` takes `{"tool": "do", "command": "...", "source": "..."}` (or
+direct tool payloads — see `detcode/service.py`) and returns
+`{"ok": true, "kind": "edit"|"generated"|"text", "output": "...", "report": {...}}`.
+Refusals come back as `{"ok": false, "refused": true, "error": "..."}`.
 
 - default: print transformed source to stdout
 - `--diff`: print a unified diff instead
@@ -88,18 +129,28 @@ Every front-end compiles to an `Intent` (`detcode/ir.py`); every engine is a
 pure function of an `Intent` plus source. Edits are span-based
 (`detcode/sourceedit.py`) so untouched code stays byte-identical.
 
-## Roadmap
+## Capabilities
 
-Capabilities are added as self-contained verticals, in this order:
+All verticals from the original roadmap are landed, plus the second-wave
+"mimic the LLM" review items:
 
-1. **Refactors / codemods** — ✅ `rename-local`, `remove-unused-imports`
-2. **Scaffolding / codegen** — ✅ `scaffold` (dataclasses + enums from a JSON spec)
-3. **Example-driven synthesis** — ✅ `synth` (bottom-up enumerative search over a typed DSL)
-4. **Bug-fix / repair** — ✅ `repair` (token-level mutation search, tests as the oracle)
+1. **Refactors / codemods** — `rename-local`, `remove-unused-imports`
+2. **Scaffolding / codegen** — `scaffold` (dataclasses + enums from a JSON spec)
+3. **Example-driven synthesis** — `synth`: bottom-up enumerative search over a
+   45-component typed DSL (ints, strings, booleans, lists, conditionals) with
+   deterministic constant mining from the examples
+4. **Bug-fix / repair** — `repair`: spectrum-based fault localization ranks
+   suspicious lines, then token-level mutation search (operators, constants,
+   boolean literals, augmented assignments, wrong-variable swaps) with the
+   test suite as the oracle
+5. **Code explanation** — `explain`: AST-derived structural summaries through
+   fixed English templates
+6. **Test generation** — `gentest`: examples → a runnable unittest module
+7. **English interface** — `do`: a controlled natural language covering every
+   engine, with "did you mean" refusals
 
-The intent front-end evolved in parallel through all three planned modes:
-I/O examples + types (`synth`) → structured spec/DSL (`scaffold`) → controlled
-natural language (`do`, via `cnl.py` → `ir.py` → `planner.py` → engine).
+Every front-end compiles to an `Intent` (`ir.py`) dispatched by `planner.py`;
+the same seam serves the CLI, the CNL, and the web API (`service.py`).
 
 ## Development
 

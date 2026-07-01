@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>detcode — a deterministic coding assistant</title>
+<style>
+  :root {
+    --bg: #0f1117; --panel: #171a23; --border: #2a2f3d;
+    --text: #e2e5ec; --dim: #8b91a0; --accent: #5eead4; --red: #f0938c;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 880px; margin: 0 auto; padding: 40px 20px 80px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--dim); margin: 0 0 28px; }
+  nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  nav button {
+    background: var(--panel); color: var(--dim); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 14px; font-size: 14px; cursor: pointer;
+  }
+  nav button.on { color: var(--text); border-color: var(--accent); }
+  label { display: block; color: var(--dim); font-size: 13px; margin: 14px 0 4px; }
+  input[type=text], textarea {
+    width: 100%; background: var(--panel); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+    font-family: var(--mono); font-size: 13.5px;
+  }
+  textarea { min-height: 130px; resize: vertical; }
+  .hint { color: var(--dim); font-size: 12.5px; margin-top: 4px; }
+  #run {
+    margin-top: 18px; background: var(--accent); color: #08251f; border: 0;
+    border-radius: 8px; padding: 10px 26px; font-size: 15px; font-weight: 600;
+    cursor: pointer;
+  }
+  #run:disabled { opacity: .5; cursor: wait; }
+  #out {
+    margin-top: 24px; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 14px 16px; font-family: var(--mono);
+    font-size: 13.5px; white-space: pre-wrap; word-break: break-word; display: none;
+  }
+  #out.refused { border-color: var(--red); color: var(--red); }
+  #meta { margin-top: 10px; color: var(--dim); font-size: 12.5px; font-family: var(--mono);
+    white-space: pre-wrap; display: none; }
+  footer { margin-top: 40px; color: var(--dim); font-size: 13px; }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <h1>det<span>code</span></h1>
+  <p class="sub">An LLM-style coding assistant with no LLM: deterministic, reproducible,
+  auditable — and honest enough to refuse what it can't do safely.</p>
+
+  <nav id="tabs"></nav>
+  <div id="fields"></div>
+  <button id="run">Run</button>
+  <div id="out"></div>
+  <div id="meta"></div>
+
+  <footer>
+    Same input &rarr; byte-identical output, every time. Refusals are deliberate:
+    anything that can't be proven safe is rejected, never guessed.
+    Source on <a href="https://github.com/alexandergshaw/developer-productivity-platform">GitHub</a>.
+  </footer>
+</main>
+
+<script>
+const TABS = [
+  {
+    id: "ask", name: "Ask in English",
+    fields: [
+      { key: "command", label: "Command", type: "text",
+        value: "write a function double where double(2) == 4 and double(5) == 10",
+        hint: "Also try: fix area so that area(2, 3) == 6 · explain area · remove unused imports" },
+      { key: "source", label: "Source code (only needed by file-editing commands)", type: "area",
+        value: "def area(width, height):\n    return width + height\n" },
+    ],
+    build: v => ({ tool: "do", command: v.command, source: v.source || undefined }),
+  },
+  {
+    id: "synth", name: "Synthesize",
+    fields: [
+      { key: "spec", label: "Examples spec (JSON)", type: "area", json: true,
+        value: JSON.stringify({ name: "full_name", examples: [
+          { in: ["ada", "lovelace"], out: "ada lovelace" },
+          { in: ["alan", "turing"], out: "alan turing" } ] }, null, 2),
+        hint: "The function is searched for, not guessed — examples are the spec." },
+    ],
+    build: v => ({ tool: "synth", spec: v.spec }),
+  },
+  {
+    id: "repair", name: "Repair",
+    fields: [
+      { key: "source", label: "Buggy source", type: "area",
+        value: "def area(w, h):\n    return w + h\n" },
+      { key: "spec", label: "Tests it must pass (JSON)", type: "area", json: true,
+        value: JSON.stringify({ function: "area", examples: [
+          { in: [2, 3], out: 6 }, { in: [4, 5], out: 20 } ] }, null, 2) },
+    ],
+    build: v => ({ tool: "repair", source: v.source, spec: v.spec }),
+  },
+  {
+    id: "scaffold", name: "Scaffold",
+    fields: [
+      { key: "spec", label: "Model spec (JSON)", type: "area", json: true,
+        value: JSON.stringify({ enums: [{ name: "Status", members: ["ACTIVE", "CLOSED"] }],
+          dataclasses: [{ name: "User", frozen: true, fields: [
+            { name: "id", type: "int" }, { name: "status", type: "Status", default: "Status.ACTIVE" } ],
+            methods: ["to_dict", "from_dict"] }] }, null, 2) },
+    ],
+    build: v => ({ tool: "scaffold", spec: v.spec }),
+  },
+  {
+    id: "gentest", name: "Generate tests",
+    fields: [
+      { key: "spec", label: "Test spec (JSON)", type: "area", json: true,
+        value: JSON.stringify({ function: "area", source: "def area(w, h):\n    return w * h\n",
+          examples: [{ in: [2, 3], out: 6 }, { in: [4, 5], out: 20 }] }, null, 2) },
+    ],
+    build: v => ({ tool: "gentest", spec: v.spec }),
+  },
+  {
+    id: "explain", name: "Explain",
+    fields: [
+      { key: "source", label: "Source code", type: "area",
+        value: "def apply_discount(price, percent=10):\n    \"\"\"Apply a percentage discount.\"\"\"\n    if percent < 0 or percent > 100:\n        raise ValueError(\"bad percent\")\n    return price - price * percent // 100\n" },
+      { key: "func", label: "Function name (blank = whole module)", type: "text", value: "apply_discount" },
+    ],
+    build: v => ({ tool: "explain", source: v.source, func: v.func || undefined }),
+  },
+];
+
+const tabsEl = document.getElementById("tabs");
+const fieldsEl = document.getElementById("fields");
+const outEl = document.getElementById("out");
+const metaEl = document.getElementById("meta");
+const runBtn = document.getElementById("run");
+let active = TABS[0];
+const saved = {};
+
+function show(tab) {
+  active = tab;
+  [...tabsEl.children].forEach(b => b.classList.toggle("on", b.dataset.id === tab.id));
+  fieldsEl.innerHTML = "";
+  for (const f of tab.fields) {
+    const label = document.createElement("label");
+    label.textContent = f.label;
+    fieldsEl.appendChild(label);
+    const el = f.type === "text"
+      ? Object.assign(document.createElement("input"), { type: "text" })
+      : document.createElement("textarea");
+    el.value = saved[tab.id + "." + f.key] ?? f.value;
+    el.dataset.key = f.key;
+    el.addEventListener("input", () => { saved[tab.id + "." + f.key] = el.value; });
+    fieldsEl.appendChild(el);
+    if (f.hint) {
+      const hint = document.createElement("div");
+      hint.className = "hint";
+      hint.textContent = f.hint;
+      fieldsEl.appendChild(hint);
+    }
+  }
+  outEl.style.display = "none";
+  metaEl.style.display = "none";
+}
+
+for (const tab of TABS) {
+  const b = document.createElement("button");
+  b.textContent = tab.name;
+  b.dataset.id = tab.id;
+  b.addEventListener("click", () => show(tab));
+  tabsEl.appendChild(b);
+}
+show(TABS[0]);
+
+function render(text, refused, report) {
+  outEl.style.display = "block";
+  outEl.classList.toggle("refused", refused);
+  outEl.textContent = text;
+  if (report) {
+    metaEl.style.display = "block";
+    metaEl.textContent = "provenance: " + JSON.stringify(report);
+  } else {
+    metaEl.style.display = "none";
+  }
+}
+
+runBtn.addEventListener("click", async () => {
+  const values = {};
+  for (const el of fieldsEl.querySelectorAll("[data-key]")) {
+    const spec = active.fields.find(f => f.key === el.dataset.key);
+    if (spec.json) {
+      try { values[el.dataset.key] = JSON.parse(el.value); }
+      catch (e) { render("Invalid JSON in “" + spec.label + "”: " + e.message, true, null); return; }
+    } else {
+      values[el.dataset.key] = el.value;
+    }
+  }
+  runBtn.disabled = true;
+  try {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(active.build(values)),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      render(data.output, false, data.report);
+    } else {
+      render((data.refused ? "Refused: " : "Error: ") + data.error, true, null);
+    }
+  } catch (e) {
+    render("Request failed: " + e.message, true, null);
+  } finally {
+    runBtn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>

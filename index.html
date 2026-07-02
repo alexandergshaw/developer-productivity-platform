@@ -25,10 +25,34 @@
   body {
     display: grid; font-family: var(--ui); font-size: 13px; color: var(--ed-fg);
     grid-template-columns: 48px 260px 1fr;
-    grid-template-rows: 1fr 220px 22px;
-    grid-template-areas: "ab sidebar main" "ab sidebar term" "status status status";
+    grid-template-rows: 30px 1fr 220px 22px;
+    grid-template-areas: "menu menu menu" "ab sidebar main" "ab sidebar term" "status status status";
     background: var(--ed-bg);
   }
+  body.term-hidden { grid-template-rows: 30px 1fr 0 22px; }
+  body.term-hidden #terminal { display: none; }
+
+  #menubar {
+    grid-area: menu; background: #3c3c3c; display: flex; align-items: center;
+    font-size: 13px; color: #cccccc; position: relative; user-select: none;
+  }
+  #menubar .menu { padding: 0 10px; height: 30px; line-height: 30px; cursor: default; }
+  #menubar .menu:hover, #menubar .menu.open { background: #505050; }
+  #titletext {
+    position: absolute; left: 0; right: 0; text-align: center; pointer-events: none;
+    color: #bbbbbb; font-size: 12.5px; white-space: nowrap; overflow: hidden;
+  }
+  #dropdown {
+    position: absolute; top: 30px; min-width: 260px; z-index: 50;
+    background: #252526; border: 1px solid #454545; box-shadow: 0 4px 10px #000a;
+    padding: 4px 0; font-size: 13px; color: #cccccc;
+  }
+  #dropdown .item { display: flex; padding: 5px 24px 5px 22px; cursor: default; white-space: nowrap; }
+  #dropdown .item:hover { background: #094771; color: #ffffff; }
+  #dropdown .item.disabled { color: #6a6a6a; }
+  #dropdown .item.disabled:hover { background: none; color: #6a6a6a; }
+  #dropdown .item .hint { margin-left: auto; padding-left: 32px; color: #8a8a8a; font-size: 12px; }
+  #dropdown .sep { border-top: 1px solid #454545; margin: 4px 10px; }
 
   #activitybar { grid-area: ab; background: var(--ab-bg); display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
   #activitybar button {
@@ -98,6 +122,13 @@
 </style>
 </head>
 <body>
+  <header id="menubar" aria-label="Menu bar">
+    <div class="menu" data-menu="file">File</div>
+    <div class="menu" data-menu="view">View</div>
+    <div id="titletext">detcode</div>
+  </header>
+  <div id="dropdown" hidden></div>
+
   <nav id="activitybar" aria-label="Activity bar">
     <button id="ab-explorer" class="on" title="Explorer">🗂</button>
     <button id="ab-detcode" title="detcode engine">🤖</button>
@@ -106,6 +137,7 @@
   <aside id="sidebar">
     <div id="view-explorer">
       <div class="sb-title">EXPLORER</div>
+      <div class="sb-title" id="ws-name" style="color:#e7e7e7" hidden></div>
       <div class="sb-section">
         <button class="sb-btn" id="open-folder">Open Folder…</button>
         <input type="file" id="folder-input" webkitdirectory multiple hidden>
@@ -309,26 +341,201 @@ $("tree").addEventListener("click", e => {
   if (f) openFile(f.dataset.f);
 });
 
-// ---------- folder loading (in-browser; works locally and on Vercel) ----------
+// ---------- workspace / folder loading (in-browser; works locally and on Vercel) ----------
 const SKIP_DIRS = /(^|\/)(\.git|node_modules|__pycache__|\.venv|venv|dist|build|\.pytest_cache|\.mypy_cache)(\/|$)/;
+const SKIP_DIR_NAMES = new Set([".git", "node_modules", "__pycache__", ".venv", "venv", "dist", "build", ".pytest_cache", ".mypy_cache"]);
 const TEXT_EXT = /\.(py|md|txt|json|toml|yml|yaml|js|ts|tsx|jsx|html|css|cfg|ini|csv|sh|bat|ps1|gitignore|xml|sql|rs|go|java|c|h|cpp)$/i;
+const MAX_FILES = 1000, MAX_SIZE = 400_000;
+let folderName = null;
 
-$("open-folder").addEventListener("click", () => $("folder-input").click());
+function confirmDiscard() {
+  const dirty = [...files.values()].filter(f => f.dirty).length;
+  if (!dirty) return true;
+  return confirm(`Discard unsaved engine edits in ${dirty} buffer(s)?`);
+}
+
+function setTitle() {
+  $("titletext").textContent = folderName ? `${folderName} — detcode` : "detcode";
+  const ws = $("ws-name");
+  ws.hidden = !folderName;
+  ws.textContent = folderName ? folderName.toUpperCase() : "";
+}
+
+function replaceWorkspace(name, entries) {
+  files.clear(); tabs = []; active = null; collapsed.clear();
+  for (const [path, content] of entries) files.set(path, { content, dirty: false });
+  folderName = name;
+  setTitle(); renderTabs(); renderTree(); renderEditor();
+  termPrint(`<span class="dim">opened ${name}: ${entries.length} files</span>`);
+}
+
+function closeFolder() {
+  if (!confirmDiscard()) return;
+  files.clear(); tabs = []; active = null; collapsed.clear(); folderName = null;
+  setTitle(); renderTabs(); renderTree(); renderEditor();
+  termPrint('<span class="dim">folder closed</span>');
+}
+
+async function walkHandle(dir, prefix, out) {
+  for await (const [name, handle] of dir.entries()) {
+    if (out.length >= MAX_FILES) return;
+    const path = `${prefix}/${name}`;
+    if (handle.kind === "directory") {
+      if (!SKIP_DIR_NAMES.has(name)) await walkHandle(handle, path, out);
+    } else if (TEXT_EXT.test(name) || !name.includes(".")) {
+      try {
+        const file = await handle.getFile();
+        if (file.size < MAX_SIZE) out.push([path, await file.text()]);
+      } catch { /* unreadable: skip */ }
+    }
+  }
+}
+
+async function loadFromHandle(handle) {
+  const entries = [];
+  await walkHandle(handle, handle.name, entries);
+  replaceWorkspace(handle.name, entries);
+}
+
+async function openFolder() {
+  if (!window.showDirectoryPicker) { $("folder-input").click(); return; }
+  if (!confirmDiscard()) return;
+  try {
+    const handle = await window.showDirectoryPicker();
+    await loadFromHandle(handle);
+    await saveRecent(handle);
+  } catch { /* user cancelled the picker */ }
+}
+
+$("open-folder").addEventListener("click", openFolder);
 $("folder-input").addEventListener("change", async e => {
+  if (!confirmDiscard()) { e.target.value = ""; return; }
   const picked = [...e.target.files]
     .filter(f => !SKIP_DIRS.test(f.webkitRelativePath))
     .filter(f => TEXT_EXT.test(f.name) || !f.name.includes("."))
-    .filter(f => f.size < 400_000)
-    .slice(0, 1000);
-  let loaded = 0;
+    .filter(f => f.size < MAX_SIZE)
+    .slice(0, MAX_FILES);
+  const entries = [];
   for (const f of picked) {
-    try { files.set(f.webkitRelativePath, { content: await f.text(), dirty: false }); loaded++; }
+    try { entries.push([f.webkitRelativePath, await f.text()]); }
     catch { /* unreadable file: skip */ }
   }
-  renderTree();
-  termPrint(`<span class="dim">loaded ${loaded} files from folder</span>`);
+  const root = entries.length ? entries[0][0].split("/")[0] : "folder";
+  replaceWorkspace(root, entries);
   e.target.value = "";
 });
+
+// ---------- recent folders (directory handles persisted in IndexedDB) ----------
+function idb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open("detcode-workbench", 1);
+    req.onupgradeneeded = () => req.result.createObjectStore("recents", { keyPath: "name" });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+function idbOp(mode, fn) {
+  return idb().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction("recents", mode);
+    const result = fn(tx.objectStore("recents"));
+    tx.oncomplete = () => resolve(result.result !== undefined ? result.result : result);
+    tx.onerror = () => reject(tx.error);
+  })).catch(() => null);
+}
+async function saveRecent(handle) {
+  await idbOp("readwrite", store => store.put({ name: handle.name, handle, time: Date.now() }));
+}
+async function getRecents() {
+  const all = await idbOp("readonly", store => store.getAll());
+  return (all || []).sort((a, b) => b.time - a.time).slice(0, 6);
+}
+async function openRecent(name) {
+  const all = await idbOp("readonly", store => store.getAll());
+  const rec = (all || []).find(r => r.name === name);
+  if (!rec) { termPrint(`<span class="err">recent folder ${esc(name)} not found</span>`); return; }
+  if (!confirmDiscard()) return;
+  try {
+    const perm = await rec.handle.requestPermission({ mode: "read" });
+    if (perm !== "granted") { termPrint('<span class="err">permission to reopen the folder was declined</span>'); return; }
+    await loadFromHandle(rec.handle);
+    await saveRecent(rec.handle);
+  } catch (err) {
+    termPrint(`<span class="err">could not reopen ${esc(name)}: ${esc(String(err))}</span>`);
+  }
+}
+
+// ---------- menu bar ----------
+let openMenu = null;
+
+async function menuItems(which) {
+  if (which === "view") {
+    return [
+      { label: "Explorer", action: () => showView("explorer") },
+      { label: "detcode Engine", action: () => showView("detcode") },
+      "-",
+      { label: "Toggle Terminal", hint: "Ctrl+`", action: () => document.body.classList.toggle("term-hidden") },
+    ];
+  }
+  const items = [
+    { label: "Open Folder…", hint: "Ctrl+K Ctrl+O", action: openFolder },
+  ];
+  if (window.showDirectoryPicker) {
+    const recents = await getRecents();
+    items.push("-");
+    if (recents.length) {
+      for (const r of recents) items.push({ label: `📁 ${r.name}`, action: () => openRecent(r.name) });
+      items.push({ label: "Clear Recently Opened", action: async () => { await idbOp("readwrite", s => s.clear()); } });
+    } else {
+      items.push({ label: "No Recent Folders", disabled: true });
+    }
+  }
+  items.push("-");
+  items.push({ label: "New Project…", action: () => {
+    $("term-in").value = 'new "a resume tailorer"'; $("term-in").focus(); $("term-in").select();
+  }});
+  items.push({ label: "Close Folder", disabled: !folderName && files.size === 0, action: closeFolder });
+  return items;
+}
+
+function closeDropdown() {
+  $("dropdown").hidden = true;
+  openMenu = null;
+  document.querySelectorAll("#menubar .menu").forEach(m => m.classList.remove("open"));
+}
+
+async function showDropdown(menuEl) {
+  const which = menuEl.dataset.menu;
+  const items = await menuItems(which);
+  const dd = $("dropdown");
+  dd.innerHTML = items.map((item, i) =>
+    item === "-" ? '<div class="sep"></div>'
+    : `<div class="item ${item.disabled ? "disabled" : ""}" data-i="${i}">${esc(item.label)}${item.hint ? `<span class="hint">${esc(item.hint)}</span>` : ""}</div>`
+  ).join("");
+  dd.style.left = menuEl.offsetLeft + "px";
+  dd.hidden = false;
+  openMenu = which;
+  document.querySelectorAll("#menubar .menu").forEach(m => m.classList.toggle("open", m === menuEl));
+  dd.onclick = e => {
+    const el = e.target.closest(".item:not(.disabled)");
+    if (!el) return;
+    const item = items[Number(el.dataset.i)];
+    closeDropdown();
+    item.action && item.action();
+  };
+}
+
+document.querySelectorAll("#menubar .menu").forEach(menuEl => {
+  menuEl.addEventListener("click", () => {
+    openMenu === menuEl.dataset.menu ? closeDropdown() : showDropdown(menuEl);
+  });
+  menuEl.addEventListener("mouseenter", () => {  // VS Code: hover switches an open menu
+    if (openMenu && openMenu !== menuEl.dataset.menu) showDropdown(menuEl);
+  });
+});
+document.addEventListener("click", e => {
+  if (openMenu && !e.target.closest("#menubar") && !e.target.closest("#dropdown")) closeDropdown();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDropdown(); });
 
 // ---------- activity bar ----------
 function showView(which) {
@@ -381,6 +588,7 @@ function materialize(fileMap, report) {
     count++;
   }
   collapsed.clear();
+  if (!folderName) { folderName = root; setTitle(); }
   renderTree();
   termPrint(`<span class="ok">✓ generated ${count} files into ${esc(root)}/</span>`);
   for (const d of (report?.decisions || [])) termPrint(`<span class="dim">  - ${esc(d)}</span>`);
@@ -473,12 +681,26 @@ $("term-in").addEventListener("keydown", e => {
     e.preventDefault();
   }
 });
+let chordPending = false, chordTimer = null;
 document.addEventListener("keydown", e => {
-  if (e.ctrlKey && e.key === "`") { $("term-in").focus(); e.preventDefault(); }
+  if (e.ctrlKey && e.key === "`") {
+    document.body.classList.remove("term-hidden");
+    $("term-in").focus(); e.preventDefault(); return;
+  }
+  if (e.ctrlKey && e.key.toLowerCase() === "k") {
+    chordPending = true; e.preventDefault();
+    clearTimeout(chordTimer);
+    chordTimer = setTimeout(() => { chordPending = false; }, 1500);
+    return;
+  }
+  if (chordPending && e.ctrlKey && e.key.toLowerCase() === "o") {
+    chordPending = false; e.preventDefault();
+    openFolder();
+  }
 });
 
 // ---------- boot ----------
-renderEditor(); renderTree();
+setTitle(); renderEditor(); renderTree();
 termPrint('<span class="dim">detcode terminal — type help. Engine responses are deterministic and carry provenance.</span>');
 fetch("/api/run").then(r => r.json()).then(u => {
   $("st-version").textContent = u.version || "";

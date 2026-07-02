@@ -443,7 +443,15 @@ def _parse_arg(text):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="__PKG__")
+    parser = argparse.ArgumentParser(
+        prog="__PKG__",
+        description=(
+            "__PKG__ - built by detcode from a plan. Call the functions in "
+            "__PKG__/core.py with Python-literal arguments; stubbed functions "
+            "fail loudly until you implement them."
+        ),
+        epilog="example: python -m __PKG__ call <function> 2 3",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
     call = sub.add_parser("call", help="call a core function with literal arguments")
     call.add_argument("function", help="function name in core.py")

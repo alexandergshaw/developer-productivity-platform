@@ -2482,7 +2482,7 @@ const HELP = [
   ["float", "move the active tab into a floating window (or drag it out)"],
   ["save / save project", "write buffers back to disk (also Ctrl+S)"],
   ["<anything else>", "English, acting on the active file (ask/fix/explain/...)"],
-].map(([c, d]) => `  <span class="ok">${c.padEnd(22)}</span><span class="dim">${d}</span>`).join("\n");
+].map(([c, d]) => `  <span class="ok">${esc(c.padEnd(22))}</span><span class="dim">${esc(d)}</span>`).join("\n");
 
 function stepReport(report, rule) {
   if (!report) return report;
@@ -2496,7 +2496,7 @@ async function runCommand(raw) {
   termPrint(`<span class="tp">detcode&gt;</span> ${esc(raw)}`);
   const cmd = raw.trim().replace(/^detcode\s+/, "");
   if (!cmd) return;
-  if (cmd === "help") { termPrint(HELP); return; }
+  if (cmd === "help" || cmd === "--help" || cmd === "-h") { termPrint(HELP); return; }
   if (cmd === "clear") { $("term-out").innerHTML = ""; return; }
   if (cmd === "split" || cmd === "split right") { splitEditor(); return; }
   if (cmd === "split down") { splitDown(); return; }

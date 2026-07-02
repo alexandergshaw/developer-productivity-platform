@@ -38,11 +38,13 @@ from .engines import (
 )
 
 from .engines import teach as teach_engine
+from .engines.knowledge import KnowledgeError
 from .engines.mint import MintError
 from .store import StoreError
 
 REFUSALS = (
     MintError,
+    KnowledgeError,
     rewrite.Unsafe,
     builder.BuildError,
     teach_engine.TeachError,
@@ -141,6 +143,44 @@ def run_request(req, store=None) -> dict:
             resp = _generated(builder.render(project), project.report)
             resp["files"] = {f.path: f.content for f in project.files}
             return resp
+        if tool == "ask":
+            from .ir import Intent
+
+            outcome = planner.run(
+                Intent.of("ask", question=str(req.get("question") or "")), None, store
+            )
+            return _text(outcome.output or "", outcome.report)
+        if tool == "learn":
+            from .engines import knowledge
+
+            if store is None:
+                return {"ok": False, "refused": True,
+                        "error": "learning needs a knowledge store (not available here)"}
+            text, report = knowledge.learn(
+                req.get("entry") or {}, store.knowledge_text()
+            )
+            store.replace_knowledge(text)
+            closed = store.close_questions(report["keywords"], report["topic"])
+            resp = _text(
+                f"learned {report['topic']!r} ({report['verified_examples']} verified "
+                f"example(s)); closed {len(closed)} open question(s)",
+                report,
+            )
+            resp["closed_questions"] = closed
+            return resp
+        if tool == "study":
+            if store is None:
+                return {"ok": False, "refused": True,
+                        "error": "the study queue needs a store (not available here)"}
+            records = store.open_questions()
+            if not records:
+                return _text("study queue is empty — every question so far has an answer", {})
+            lines = ["Open questions (feed answers back with detcode learn):"]
+            for r in records:
+                mark = "✓" if r["status"] == "answered" else "•"
+                suffix = f"  [answered by: {r['answered_by']}]" if r["answered_by"] else ""
+                lines.append(f"{mark} {r['question']}{suffix}")
+            return _text("\n".join(lines), {"open": len(records)})
         if tool == "complete":
             from .engines import complete as complete_engine
 

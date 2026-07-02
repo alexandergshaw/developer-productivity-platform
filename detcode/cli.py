@@ -38,6 +38,12 @@ def _store_error():
     return StoreError
 
 
+def _knowledge_error():
+    from .engines.knowledge import KnowledgeError
+
+    return KnowledgeError
+
+
 def _load_corpus(path_arg: str | None) -> tuple:
     """User corpus entries, verified on load.
 
@@ -232,6 +238,100 @@ def _cmd_corpus_import(args) -> int:
     store = store_module.Store()
     count = store.replace_corpus(text, action="import")
     print(f"{store.path}: imported {len(incoming)} entr(y/ies); corpus now {count}", file=sys.stderr)
+    return 0
+
+
+def _cmd_ask(args) -> int:
+    from . import store as store_module
+    from .ir import Intent
+
+    store = store_module.Store()
+    outcome = planner.run(Intent.of("ask", question=args.question), None, store)
+    print(outcome.output)
+    return 0
+
+
+def _cmd_learn(args) -> int:
+    from . import store as store_module
+    from .engines import knowledge
+
+    guidance = args.guidance or (_read(args.file) if args.file else "")
+    entry = {
+        "topic": args.topic,
+        "keywords": [k for k in (args.keywords or "").split(",") if k.strip()],
+        "guidance": guidance,
+        "sources": args.source or [],
+        "examples": json.loads(_read(args.examples)) if args.examples else [],
+    }
+    store = store_module.Store()
+    text, report = knowledge.learn(entry, store.knowledge_text())
+    store.replace_knowledge(text)
+    closed = store.close_questions(report["keywords"], report["topic"])
+    print(
+        f"{store.path}: learned {report['topic']!r} "
+        f"({report['verified_examples']} verified example(s))",
+        file=sys.stderr,
+    )
+    for question in closed:
+        print(f"  ✓ answers open question: {question}", file=sys.stderr)
+    return 0
+
+
+def _cmd_study(args) -> int:
+    from . import store as store_module
+
+    records = store_module.Store().open_questions()
+    if not records:
+        print("study queue is empty — every question so far has an answer")
+        return 0
+    for record in records:
+        mark = "✓" if record["status"] == "answered" else "•"
+        suffix = f"  [answered by: {record['answered_by']}]" if record["answered_by"] else ""
+        print(f"{mark} {record['question']}{suffix}")
+    return 0
+
+
+def _cmd_knowledge_list(args) -> int:
+    from . import store as store_module
+    from .engines import knowledge
+
+    for entry in knowledge.BUILTIN_KNOWLEDGE:
+        print(f"{entry['topic']}  [built-in]")
+    if os.path.exists(store_module.DEFAULT_DB_PATH):
+        for entry in knowledge.load_knowledge(store_module.Store().knowledge_text()):
+            print(f"{entry['topic']}  [learned]")
+    return 0
+
+
+def _cmd_knowledge_export(args) -> int:
+    from . import store as store_module
+    from .engines import knowledge
+
+    text = store_module.Store().knowledge_text()
+    knowledge.load_knowledge(text)  # never export what would not verify
+    if args.out:
+        _write(args.out, text)
+        print(f"{args.out}: exported (commit this file to share)", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _cmd_knowledge_import(args) -> int:
+    from . import store as store_module
+    from .engines import knowledge
+
+    incoming_text = _read(args.file)
+    incoming = knowledge.load_knowledge(incoming_text)  # full re-verification
+    store = store_module.Store()
+    existing = {e["topic"]: e for e in knowledge.load_knowledge(store.knowledge_text())}
+    existing.update({e["topic"]: e for e in incoming})  # imported entries win
+    merged = json.dumps(
+        {"detcode_knowledge": 1, "entries": sorted(existing.values(), key=lambda e: e["topic"])},
+        indent=2, sort_keys=True,
+    ) + "\n"
+    count = store.replace_knowledge(merged, action="import-knowledge")
+    print(f"{store.path}: imported {len(incoming)} entr(y/ies); knowledge now {count}", file=sys.stderr)
     return 0
 
 
@@ -462,7 +562,7 @@ def _cmd_do(args) -> int:
     before = _read(args.file) if args.file else None
     # A store only when needed: teaching requires one; an existing local DB
     # should feed retrieval. Plain commands must not create .detcode/.
-    needs_store = any(i.operation == "teach" for i in intents)
+    needs_store = any(i.operation in ("teach", "ask") for i in intents)
     store = (
         store_module.Store()
         if needs_store or os.path.exists(store_module.DEFAULT_DB_PATH)
@@ -551,6 +651,35 @@ def build_parser() -> argparse.ArgumentParser:
     cp_imp = cp_sub.add_parser("import", help="verify and merge a shared corpus file")
     cp_imp.add_argument("file", help="corpus JSON file to import")
     cp_imp.set_defaults(handler=_cmd_corpus_import)
+
+    ak = sub.add_parser("ask", help="technical guidance (not code generation)")
+    ak.add_argument("question", help='e.g. "how should I store money amounts?"')
+    ak.set_defaults(handler=_cmd_ask)
+
+    ln = sub.add_parser(
+        "learn", help="add a verified knowledge entry (closes matching open questions)"
+    )
+    ln.add_argument("--topic", required=True, help="entry topic")
+    ln.add_argument("--keywords", required=True, help="comma-separated match keywords")
+    ln.add_argument("--guidance", help="the guidance text")
+    ln.add_argument("--file", help="read guidance from this file instead")
+    ln.add_argument("--source", action="append", help="citation URL/reference (repeatable)")
+    ln.add_argument("--examples", help="JSON file of [{code, note}] assert-bearing examples")
+    ln.set_defaults(handler=_cmd_learn)
+
+    st = sub.add_parser("study", help="open questions the engine could not answer yet")
+    st.set_defaults(handler=_cmd_study)
+
+    kn = sub.add_parser("knowledge", help="inspect and share the knowledge base")
+    kn_sub = kn.add_subparsers(dest="knowledge_command", required=True)
+    kn_list = kn_sub.add_parser("list", help="built-in and learned topics")
+    kn_list.set_defaults(handler=_cmd_knowledge_list)
+    kn_exp = kn_sub.add_parser("export", help="canonical JSON for committing/sharing")
+    kn_exp.add_argument("--out", help="write to this path (default: stdout)")
+    kn_exp.set_defaults(handler=_cmd_knowledge_export)
+    kn_imp = kn_sub.add_parser("import", help="re-verify and merge a shared knowledge file")
+    kn_imp.add_argument("file", help="knowledge JSON file to import")
+    kn_imp.set_defaults(handler=_cmd_knowledge_import)
 
     mt = sub.add_parser(
         "mint", help="turn a finished, green-tested project into a reusable pack"
@@ -650,6 +779,13 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Learned guidance and status glyphs can be arbitrary unicode; never let a
+    # cp1252 console crash the CLI — degrade unencodable characters instead.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, OSError):
+            pass
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
@@ -668,6 +804,7 @@ def main(argv: list[str] | None = None) -> int:
         teach.TeachError,
         teach.CorpusError,
         mint_engine.MintError,
+        _knowledge_error(),
         _store_error(),
         cnl.CNLError,
         planner.UnknownIntent,

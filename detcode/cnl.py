@@ -55,6 +55,7 @@ GRAMMAR = (
     "build a <project direction>  (e.g. build a resume tailorer)",
     "plan a <project direction>  (spec interview for unknown domains)",
     "teach <func> where <func>(args) == value [and ...]  (grow the corpus)",
+    "ask <question>  (technical guidance; bare 'how/why/should ...' works too)",
 )
 
 
@@ -182,6 +183,20 @@ _PATTERNS = (
     (
         re.compile(r"^plan\s+(?:a|an)\s+(?P<direction>.+)$", re.IGNORECASE),
         lambda m: Intent.of("plan", direction=m["direction"]),
+    ),
+    # Technical guidance. "ask ..." always works; bare question forms route
+    # here too ("how do I store money", "should I use floats for currency").
+    (
+        re.compile(r"^ask\s+(?P<question>.+)$", re.IGNORECASE),
+        lambda m: Intent.of("ask", question=m["question"]),
+    ),
+    (
+        re.compile(
+            r"^(?P<question>(?:how|why|when|where|should|is\s+it|whats|what\s+is|"
+            r"what\s+are)\b.+)$",
+            re.IGNORECASE,
+        ),
+        lambda m: Intent.of("ask", question=m["question"]),
     ),
     (
         re.compile(

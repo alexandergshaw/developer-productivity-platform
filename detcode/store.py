@@ -39,6 +39,19 @@ CREATE TABLE IF NOT EXISTS packs (
     files        TEXT NOT NULL,
     content_hash TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS knowledge (
+    topic    TEXT PRIMARY KEY,
+    keywords TEXT NOT NULL,
+    guidance TEXT NOT NULL,
+    sources  TEXT NOT NULL,
+    examples TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS open_questions (
+    question TEXT PRIMARY KEY,
+    keywords TEXT NOT NULL,
+    status   TEXT NOT NULL DEFAULT 'open',
+    answered_by TEXT
+);
 CREATE TABLE IF NOT EXISTS audit (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     at      REAL NOT NULL,
@@ -127,6 +140,82 @@ class Store:
     def corpus_count(self) -> int:
         with self._conn() as db:
             return db.execute("SELECT COUNT(*) FROM corpus").fetchone()[0]
+
+    # --------------------------------------------------------------- knowledge
+    def knowledge_text(self) -> str:
+        """The learned knowledge as canonical JSON (interchange form)."""
+        with self._conn() as db:
+            rows = db.execute(
+                "SELECT topic, keywords, guidance, sources, examples "
+                "FROM knowledge ORDER BY topic"
+            ).fetchall()
+        entries = [
+            {
+                "topic": t, "keywords": json.loads(k), "guidance": g,
+                "sources": json.loads(s), "examples": json.loads(e),
+            }
+            for t, k, g, s, e in rows
+        ]
+        return json.dumps(
+            {"detcode_knowledge": 1, "entries": entries}, indent=2, sort_keys=True
+        ) + "\n"
+
+    def replace_knowledge(self, knowledge_text: str, action: str = "learn") -> int:
+        try:
+            entries = json.loads(knowledge_text)["entries"]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            raise StoreError(f"bad knowledge text: {exc}") from exc
+        with self._conn() as db:
+            db.execute("DELETE FROM knowledge")
+            db.executemany(
+                "INSERT INTO knowledge (topic, keywords, guidance, sources, examples) "
+                "VALUES (?, ?, ?, ?, ?)",
+                [
+                    (
+                        e["topic"], canonical_json(e["keywords"]), e["guidance"],
+                        canonical_json(e["sources"]), canonical_json(e["examples"]),
+                    )
+                    for e in entries
+                ],
+            )
+        self.audit(action, f"{len(entries)} knowledge entr(y/ies)", content_hash(knowledge_text))
+        return len(entries)
+
+    # ----------------------------------------------------------- study queue
+    def log_question(self, question: str, keywords: list[str]) -> None:
+        with self._conn() as db:
+            db.execute(
+                "INSERT OR IGNORE INTO open_questions (question, keywords) VALUES (?, ?)",
+                (question.strip(), canonical_json(sorted(keywords))),
+            )
+
+    def open_questions(self) -> list[dict]:
+        with self._conn() as db:
+            rows = db.execute(
+                "SELECT question, keywords, status, answered_by FROM open_questions "
+                "ORDER BY question"
+            ).fetchall()
+        return [
+            {"question": q, "keywords": json.loads(k), "status": s, "answered_by": a}
+            for q, k, s, a in rows
+        ]
+
+    def close_questions(self, keywords: list[str], answered_by: str) -> list[str]:
+        """Close open questions whose keywords intersect ``keywords``."""
+        wanted = set(k.lower() for k in keywords)
+        closed = []
+        for record in self.open_questions():
+            if record["status"] == "open" and wanted & set(record["keywords"]):
+                closed.append(record["question"])
+        if closed:
+            with self._conn() as db:
+                db.executemany(
+                    "UPDATE open_questions SET status = 'answered', answered_by = ? "
+                    "WHERE question = ?",
+                    [(answered_by, q) for q in closed],
+                )
+            self.audit("answered", f"{len(closed)} question(s)", answered_by)
+        return closed
 
     # ------------------------------------------------------------------- packs
     def upsert_pack(self, record: dict) -> None:

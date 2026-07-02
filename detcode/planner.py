@@ -129,6 +129,29 @@ def run(intent: Intent, source: str | None = None, store=None) -> Outcome:
         r = repair.repair(_needs_source(intent, source), _spec(intent))
         return Outcome(r.source, None, r.changed, r.report)
 
+    if op == "ask":
+        from . import packs as packs_module
+        from .engines import knowledge
+        from .engines.retrieve import CORPUS
+
+        learned = ()
+        user_pack_list = ()
+        if store is not None:
+            learned = knowledge.load_knowledge(store.knowledge_text())
+            user_pack_list = tuple(store.user_packs())
+        answer = knowledge.ask(
+            intent.get("question") or "",
+            extra_entries=learned,
+            corpus=tuple(CORPUS) + corpus_entries(store),
+            pack_list=tuple(packs_module.registry()[:-1]) + user_pack_list,
+        )
+        if answer.outcome == "miss" and store is not None:
+            store.log_question(
+                intent.get("question") or "",
+                answer.report.get("question_keywords", []),
+            )
+        return Outcome(None, answer.text, False, answer.report)
+
     if op == "add-function":
         # Derive the function from its examples, then append it to the file —
         # verified generation plus a collision-refusing codemod.

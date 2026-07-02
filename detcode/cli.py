@@ -32,11 +32,20 @@ from .engines import (
 
 
 def _load_corpus(path_arg: str | None) -> tuple:
-    """User corpus entries: --corpus path, or .detcode/corpus.json if present."""
-    path = path_arg or teach.DEFAULT_CORPUS_PATH
-    if path_arg is None and not os.path.exists(path):
-        return ()
-    return teach.load_corpus(_read(path))
+    """User corpus entries, verified on load.
+
+    Priority: explicit --corpus JSON file, then the local database
+    (.detcode/detcode.db), then the legacy .detcode/corpus.json.
+    """
+    from . import store as store_module
+
+    if path_arg:
+        return teach.load_corpus(_read(path_arg))
+    if os.path.exists(store_module.DEFAULT_DB_PATH):
+        return teach.load_corpus(store_module.Store().corpus_text())
+    if os.path.exists(teach.DEFAULT_CORPUS_PATH):
+        return teach.load_corpus(_read(teach.DEFAULT_CORPUS_PATH))
+    return ()
 
 
 class _EditResult:
@@ -106,20 +115,116 @@ def _cmd_scaffold(args) -> int:
     return 0
 
 
+def _persist_corpus(corpus_text: str, path_arg: str | None, action: str) -> str:
+    """Write the verified corpus: JSON file when --corpus given, DB otherwise."""
+    from . import store as store_module
+
+    if path_arg:
+        os.makedirs(os.path.dirname(path_arg) or ".", exist_ok=True)
+        _write(path_arg, corpus_text)
+        return path_arg
+    store = store_module.Store()
+    store.replace_corpus(corpus_text, action=action)
+    return store.path
+
+
+def _existing_corpus_text(path_arg: str | None) -> str | None:
+    from . import store as store_module
+
+    if path_arg:
+        return _read(path_arg) if os.path.exists(path_arg) else None
+    if os.path.exists(store_module.DEFAULT_DB_PATH):
+        return store_module.Store().corpus_text()
+    if os.path.exists(teach.DEFAULT_CORPUS_PATH):
+        return _read(teach.DEFAULT_CORPUS_PATH)
+    return None
+
+
 def _cmd_teach(args) -> int:
+    if args.all:
+        return _cmd_teach_all(args)
+    if not (args.file and args.func and args.examples):
+        raise teach.TeachError("teach needs --file, --func and --examples (or --all)")
     spec = json.loads(_read(args.examples))
     examples = spec.get("examples") if isinstance(spec, dict) else spec
-    corpus_path = args.corpus or teach.DEFAULT_CORPUS_PATH
-    existing = _read(corpus_path) if os.path.exists(corpus_path) else None
-    result = teach.teach(_read(args.file), args.func, examples, existing)
-    os.makedirs(os.path.dirname(corpus_path) or ".", exist_ok=True)
-    _write(corpus_path, result.corpus_text)
+    result = teach.teach(_read(args.file), args.func, examples, _existing_corpus_text(args.corpus))
+    where = _persist_corpus(result.corpus_text, args.corpus, "teach")
     print(
-        f"{corpus_path}: taught {args.func!r} "
+        f"{where}: taught {args.func!r} "
         f"({result.report['cases_verified']} example(s) verified, "
         f"{result.report['corpus_entries']} entr(y/ies) total)",
         file=sys.stderr,
     )
+    return 0
+
+
+def _cmd_teach_all(args) -> int:
+    root = args.dir or "."
+    module_sources: dict = {}
+    test_sources: list = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+        for fname in sorted(filenames):
+            if not fname.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fname)
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            if "tests/" in rel or fname.startswith("test_"):
+                test_sources.append(_read(full))
+            else:
+                module_sources[rel] = _read(full)
+    result = teach.teach_all(module_sources, test_sources, _existing_corpus_text(args.corpus))
+    where = _persist_corpus(result.corpus_text, args.corpus, "teach-all")
+    taught = result.report["taught"]
+    print(f"{where}: taught {len(taught)} function(s): {', '.join(taught) or '(none)'}", file=sys.stderr)
+    for name, reason in sorted(result.report["skipped"].items()):
+        print(f"  skipped {name}: {reason}", file=sys.stderr)
+    return 0
+
+
+def _cmd_corpus_list(args) -> int:
+    entries = _load_corpus(None)
+    if not entries:
+        print("corpus is empty — teach something first", file=sys.stderr)
+        return 0
+    for entry in entries:
+        print(f"{entry.name}/{entry.arity}")
+    return 0
+
+
+def _cmd_corpus_export(args) -> int:
+    text = _existing_corpus_text(None)
+    if text is None:
+        raise teach.CorpusError("nothing to export — the corpus is empty")
+    teach.load_corpus(text)  # never export something that would not verify
+    if args.out:
+        _write(args.out, text)
+        print(f"{args.out}: exported (commit this file to share the corpus)", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _cmd_corpus_import(args) -> int:
+    import json as _json
+
+    from . import store as store_module
+
+    incoming_text = _read(args.file)
+    teach.load_corpus(incoming_text)  # full verification before anything merges
+    incoming = _json.loads(incoming_text)["entries"]
+    existing_text = _existing_corpus_text(None)
+    existing = _json.loads(existing_text)["entries"] if existing_text else []
+    merged = {e["name"]: e for e in existing}
+    merged.update({e["name"]: e for e in incoming})  # imported entries win
+    text = _json.dumps(
+        {"detcode_corpus": 1, "entries": sorted(merged.values(), key=lambda e: e["name"])},
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    store = store_module.Store()
+    count = store.replace_corpus(text, action="import")
+    print(f"{store.path}: imported {len(incoming)} entr(y/ies); corpus now {count}", file=sys.stderr)
     return 0
 
 
@@ -292,11 +397,28 @@ def build_parser() -> argparse.ArgumentParser:
     tc = sub.add_parser(
         "teach", help="verify a function against examples and add it to the local corpus"
     )
-    tc.add_argument("--file", required=True, help="Python file containing the function")
-    tc.add_argument("--func", required=True, help="top-level function to teach")
-    tc.add_argument("--examples", required=True, help="JSON: {examples: [...]} or a bare list")
-    tc.add_argument("--corpus", help=f"corpus file (default: {teach.DEFAULT_CORPUS_PATH})")
+    tc.add_argument("--file", help="Python file containing the function")
+    tc.add_argument("--func", help="top-level function to teach")
+    tc.add_argument("--examples", help="JSON: {examples: [...]} or a bare list")
+    tc.add_argument(
+        "--all", action="store_true",
+        help="sweep a whole project: mine examples from its tests, teach every "
+        "self-contained function they cover",
+    )
+    tc.add_argument("--dir", help="project directory for --all (default: .)")
+    tc.add_argument("--corpus", help="use a JSON corpus file instead of the database")
     tc.set_defaults(handler=_cmd_teach)
+
+    cp = sub.add_parser("corpus", help="inspect and share the taught-function corpus")
+    cp_sub = cp.add_subparsers(dest="corpus_command", required=True)
+    cp_list = cp_sub.add_parser("list", help="list taught functions")
+    cp_list.set_defaults(handler=_cmd_corpus_list)
+    cp_exp = cp_sub.add_parser("export", help="canonical JSON for committing/sharing")
+    cp_exp.add_argument("--out", help="write to this path (default: stdout)")
+    cp_exp.set_defaults(handler=_cmd_corpus_export)
+    cp_imp = cp_sub.add_parser("import", help="verify and merge a shared corpus file")
+    cp_imp.add_argument("file", help="corpus JSON file to import")
+    cp_imp.set_defaults(handler=_cmd_corpus_import)
 
     rp = sub.add_parser(
         "repair", help="repair a buggy function so it passes input/output tests"

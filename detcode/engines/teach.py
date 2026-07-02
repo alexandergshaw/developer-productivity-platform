@@ -114,6 +114,100 @@ def teach(source: str, func: str, examples: list, corpus_text: str | None = None
     return Result(new_text, report)
 
 
+def mine_examples(test_source: str) -> dict[str, list[dict]]:
+    """Extract (function, examples) pairs from a test file.
+
+    Any ``assertEqual(<something>.fn(literal, ...), literal)`` — the exact
+    shape detcode-generated tests use — becomes an example for ``fn``. Calls
+    with non-literal arguments are skipped; nothing is guessed.
+    """
+    try:
+        tree = ast.parse(test_source)
+    except SyntaxError:
+        return {}
+    mined: dict[str, list[dict]] = {}
+    for node in ast.walk(tree):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "assertEqual"
+            and len(node.args) == 2
+            and isinstance(node.args[0], ast.Call)
+        ):
+            continue
+        inner = node.args[0]
+        target = inner.func
+        fname = target.attr if isinstance(target, ast.Attribute) else (
+            target.id if isinstance(target, ast.Name) else None
+        )
+        if not fname or inner.keywords:
+            continue
+        try:
+            args = [ast.literal_eval(a) for a in inner.args]
+            expected = ast.literal_eval(node.args[1])
+        except (ValueError, SyntaxError):
+            continue
+        example = {"in": args, "out": expected}
+        bucket = mined.setdefault(fname, [])
+        if example not in bucket:
+            bucket.append(example)
+    return mined
+
+
+def teach_all(
+    module_sources: dict[str, str],
+    test_sources: list[str],
+    corpus_text: str | None = None,
+) -> Result:
+    """Sweep a project: teach every self-contained function its tests cover.
+
+    Examples are mined from the test sources; functions without mined
+    examples, with fancy signatures, or that fail isolation are skipped with
+    a recorded reason — never taught on faith.
+    """
+    mined: dict[str, list[dict]] = {}
+    for text in test_sources:
+        for fname, examples in mine_examples(text).items():
+            bucket = mined.setdefault(fname, [])
+            bucket.extend(ex for ex in examples if ex not in bucket)
+
+    taught: list[str] = []
+    skipped: dict[str, str] = {}
+    current = corpus_text
+    for path in sorted(module_sources):
+        source = module_sources[path]
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            skipped[path] = f"file does not parse: {exc}"
+            continue
+        for node in tree.body:
+            if not isinstance(node, ast.FunctionDef) or node.name.startswith("_"):
+                continue
+            if node.name in taught or node.name in skipped:
+                continue
+            if node.name not in mined:
+                skipped[node.name] = "no literal examples found in the tests"
+                continue
+            try:
+                result = teach(source, node.name, mined[node.name], current)
+                current = result.corpus_text
+                taught.append(node.name)
+            except TeachError as exc:
+                skipped[node.name] = str(exc)
+
+    if current is None:
+        raise TeachError("nothing taught: no function had mineable examples")
+    report = provenance(
+        "teach_all",
+        RULE_VERSION,
+        taught=taught,
+        skipped=skipped,
+        corpus_hash=content_hash(current),
+    )
+    return Result(current, report)
+
+
 def _parse_corpus(text: str) -> list[dict]:
     try:
         data = json.loads(text)

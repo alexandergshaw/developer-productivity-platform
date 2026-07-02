@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 from .determinism import provenance
 from .ir import Intent
-from .engines import document, explain, gentest, repair, retrieve, rewrite, scaffold
+from .engines import builder, document, explain, gentest, repair, retrieve, rewrite, scaffold
 
 
 class UnknownIntent(Exception):
@@ -101,6 +101,10 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
     if op == "scaffold":
         r = scaffold.scaffold(_spec(intent))
         return Outcome(None, r.source, False, r.report)
+
+    if op == "new":
+        project = builder.build(intent.get("direction") or "")
+        return Outcome(None, builder.render(project), False, project.report)
 
     if op == "gentest":
         spec = _spec(intent)

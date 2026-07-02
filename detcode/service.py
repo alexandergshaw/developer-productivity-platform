@@ -7,6 +7,7 @@ package so it is unit-testable without HTTP. Refusals — the deliberate
 Request shape::
 
     {"tool": "do",       "command": "...", "source": "..."?}
+    {"tool": "new",      "direction": "..."}
     {"tool": "synth",    "spec": {...}}
     {"tool": "scaffold", "spec": {...}}
     {"tool": "gentest",  "spec": {...}}
@@ -24,10 +25,21 @@ Response shape::
 from __future__ import annotations
 
 from . import cnl, planner
-from .engines import document, explain, gentest, repair, retrieve, rewrite, scaffold, synth
+from .engines import (
+    builder,
+    document,
+    explain,
+    gentest,
+    repair,
+    retrieve,
+    rewrite,
+    scaffold,
+    synth,
+)
 
 REFUSALS = (
     rewrite.Unsafe,
+    builder.BuildError,
     scaffold.SpecError,
     synth.SpecError,
     synth.NoSolution,
@@ -99,6 +111,9 @@ def run_request(req) -> dict:
         if tool == "document":
             r = document.add_docstrings(str(req.get("source") or ""), req.get("func") or None)
             return _edit(r.source, r.changed, r.report)
+        if tool == "new":
+            project = builder.build(str(req.get("direction") or ""))
+            return _generated(builder.render(project), project.report)
         return {"ok": False, "refused": False, "error": f"unknown tool {tool!r}"}
     except REFUSALS as exc:
         return {"ok": False, "refused": True, "error": str(exc)}

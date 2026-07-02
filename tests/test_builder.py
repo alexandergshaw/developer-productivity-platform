@@ -111,5 +111,50 @@ class BuildGenericTests(unittest.TestCase):
         self.assertIn("# ===== README.md =====", text)
 
 
+class EnglishAndServiceTests(unittest.TestCase):
+    def test_build_a_project_via_english(self):
+        from detcode import cnl, planner
+
+        intent = cnl.parse("build a resume tailorer")
+        self.assertEqual(intent.operation, "new")
+        outcome = planner.run(intent)
+        self.assertIn("# Project: resume_tailorer", outcome.output)
+        self.assertIn("Decisions", outcome.output)
+
+    def test_create_and_start_verbs(self):
+        from detcode import cnl
+
+        self.assertEqual(cnl.parse("create a teaching assistant app").operation, "new")
+        self.assertEqual(cnl.parse("please start a flashcard study tool").operation, "new")
+
+    def test_vague_make_command_still_refused(self):
+        from detcode import cnl
+        from detcode.cnl import CNLError
+
+        with self.assertRaises(CNLError):
+            cnl.parse("make it faster")  # no "a/an" — refuse, don't scaffold
+
+    def test_write_a_function_not_hijacked(self):
+        from detcode import cnl
+
+        intent = cnl.parse("make a function double where double(2) == 4")
+        self.assertEqual(intent.operation, "synth")
+
+    def test_service_new_tool(self):
+        from detcode.service import run_request
+
+        resp = run_request({"tool": "new", "direction": "a teaching assistant app"})
+        self.assertTrue(resp["ok"])
+        self.assertIn("teaching_assistant/scheduler.py", resp["output"])
+        self.assertEqual(resp["report"]["pack"], "teaching-assistant")
+
+    def test_service_refuses_empty_direction(self):
+        from detcode.service import run_request
+
+        resp = run_request({"tool": "new", "direction": "  "})
+        self.assertFalse(resp["ok"])
+        self.assertTrue(resp["refused"])
+
+
 if __name__ == "__main__":
     unittest.main()

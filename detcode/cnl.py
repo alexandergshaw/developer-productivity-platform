@@ -51,6 +51,7 @@ GRAMMAR = (
     "fix <func> so that <func>(args) == value [and ...]",
     "write a function <name> where <name>(args) == value [and ...]",
     "generate tests for <func> where <func>(args) == value [and ...]",
+    "build a <project direction>  (e.g. build a resume tailorer)",
 )
 
 
@@ -174,6 +175,16 @@ _PATTERNS = (
             "gentest",
             {"function": m["func"], "examples": _conditions(m["cond"], m["func"])},
         ),
+    ),
+    # Project building. Requires "a/an" so vague commands ("make it faster")
+    # still refuse instead of scaffolding a mystery project. Tried last:
+    # "write/make a function ..." forms are matched (or rewritten) above.
+    (
+        re.compile(
+            r"^(?:build|create|make|start|scaffold)\s+(?:me\s+)?(?:a|an)\s+(?P<direction>.+)$",
+            re.IGNORECASE,
+        ),
+        lambda m: Intent.of("new", direction=m["direction"]),
     ),
 )
 

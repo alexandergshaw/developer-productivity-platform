@@ -77,11 +77,20 @@ const TABS = [
     fields: [
       { key: "command", label: "Command", type: "text",
         value: "write a function is_prime where is_prime(7) == True and is_prime(8) == False",
-        hint: "Also try: fix area so that area(2, 3) == 6 · what does area do? · add a docstring to area · clean up · remove unused imports then document" },
+        hint: "Also try: build a resume tailorer · fix area so that area(2, 3) == 6 · what does area do? · add a docstring to area · clean up · remove unused imports then document" },
       { key: "source", label: "Source code (only needed by file-editing commands)", type: "area",
         value: "def area(width, height):\n    return width + height\n" },
     ],
     build: v => ({ tool: "do", command: v.command, source: v.source || undefined }),
+  },
+  {
+    id: "new", name: "New project",
+    fields: [
+      { key: "direction", label: "Project direction", type: "text",
+        value: "a resume tailorer",
+        hint: "Also try: a teaching assistant app · a flashcard study tool · an invoice reconciliation tool (generic skeleton). Every decision detcode makes is recorded in the output." },
+    ],
+    build: v => ({ tool: "new", direction: v.direction }),
   },
   {
     id: "synth", name: "Synthesize",

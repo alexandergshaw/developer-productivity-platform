@@ -61,6 +61,22 @@ detcode do "rename local total to acc in compute" --file app.py --write
 Unrecognized commands are refused with the closest supported form
 (deterministic edit distance) — never guessed at.
 
+And detcode can build out whole experimental projects from a direction:
+
+```bash
+detcode new "a resume tailorer" --out resume_tailorer
+detcode new "a teaching assistant app" --out teaching_assistant
+detcode new "an invoice reconciliation tool" --dry-run   # decisions + file list
+
+cd resume_tailorer
+python -m resume_tailorer my_resume.txt job_posting.txt
+python -m unittest discover -s tests    # generated projects ship green tests
+```
+
+The generated README lists every decision detcode made and how to grow the
+project with detcode's example-driven tools. Existing files are never
+overwritten — a collision refuses the whole write.
+
 Each capability also has a direct subcommand:
 
 ```bash
@@ -157,6 +173,15 @@ pure function of an `Intent` plus source. Edits are span-based
    (make/build → write, debug → fix, "what does f do?" → explain f), "did you
    mean" refusals, and quote-aware chaining ("remove unused imports then
    rename local total to acc in compute")
+9. **Project builder** — `new`: give a general direction and detcode builds
+   out a complete runnable project, exercising independence deterministically:
+   every decision (domain pack, package name, layout) comes from a fixed
+   procedure and is recorded in the build report and the generated README.
+   Domain packs ship real, tested logic — **resume tailorer** (keyword
+   extraction, coverage scoring, bullet ranking, tailoring suggestions) and
+   **teaching assistant** (flashcards from notes, cloze quizzes, SM-2 spaced
+   repetition); unmatched directions get a runnable skeleton that marks
+   exactly where the domain logic goes
 
 Every front-end compiles to an `Intent` (`ir.py`) dispatched by `planner.py`;
 the same seam serves the CLI, the CNL, and the web API (`service.py`).

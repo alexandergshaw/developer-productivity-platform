@@ -19,7 +19,10 @@ USAGE = {
     "version": TOOL_VERSION,
     "usage": "POST a JSON body like "
     '{"tool": "do", "command": "write a function double where double(2) == 4"}',
-    "tools": ["do", "synth", "scaffold", "gentest", "repair", "rename", "imports", "explain"],
+    "tools": [
+        "do", "new", "synth", "scaffold", "gentest", "repair",
+        "rename", "imports", "explain", "document",
+    ],
 }
 
 

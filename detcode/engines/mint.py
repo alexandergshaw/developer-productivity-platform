@@ -89,11 +89,12 @@ def mint_record(
     return record
 
 
-def verify_project(root: str, slug: str) -> unittest.TestResult:
-    """Run the project's own tests in-process; minting requires green."""
+def run_project_tests(root: str) -> unittest.TestResult:
+    """Run a project's tests/test_*.py in-process, reporting whatever happens."""
     test_dir = os.path.join(root, "tests")
     if not os.path.isdir(test_dir):
-        raise MintError("the project has no tests/ directory — packs must be proof-carrying")
+        raise MintError("the project has no tests/ directory")
+    before = set(sys.modules)
     sys.path.insert(0, root)
     try:
         result = unittest.TestResult()
@@ -101,28 +102,42 @@ def verify_project(root: str, slug: str) -> unittest.TestResult:
             if not (fname.startswith("test_") and fname.endswith(".py")):
                 continue
             spec = importlib.util.spec_from_file_location(
-                f"minting_{slug}_{fname[:-3]}", os.path.join(test_dir, fname)
+                f"project_tests_{fname[:-3]}", os.path.join(test_dir, fname)
             )
             module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
+            try:
+                spec.loader.exec_module(module)
+            except Exception as exc:
+                # A test file that cannot even load is a failing result,
+                # never a crash: report it like any other error.
+                case = unittest.FunctionTestCase(
+                    lambda: None, description=f"import {fname}"
+                )
+                result.errors.append((case, f"{type(exc).__name__}: {exc}"))
+                result.testsRun += 1
+                continue
             unittest.TestLoader().loadTestsFromModule(module).run(result)
-        if result.testsRun == 0:
-            raise MintError("no tests ran — packs must be proof-carrying")
-        if result.failures or result.errors:
-            raise MintError(
-                f"the project's tests are not green ({len(result.failures)} failure(s), "
-                f"{len(result.errors)} error(s)) — fix them, then mint"
-            )
         return result
     finally:
         sys.path.remove(root)
-        for mod in [m for m in list(sys.modules) if m == slug or m.startswith(slug + ".")
-                    or m.startswith(f"minting_{slug}_")]:
+        for mod in set(sys.modules) - before:
             del sys.modules[mod]
 
 
-def materialize_and_verify(files: dict[str, str], slug: str) -> unittest.TestResult:
-    """Write project files to a temp dir, run their tests, clean up."""
+def verify_project(root: str, slug: str) -> unittest.TestResult:
+    """Run the project's own tests in-process; minting requires green."""
+    result = run_project_tests(root)
+    if result.testsRun == 0:
+        raise MintError("no tests ran — packs must be proof-carrying")
+    if result.failures or result.errors:
+        raise MintError(
+            f"the project's tests are not green ({len(result.failures)} failure(s), "
+            f"{len(result.errors)} error(s)) — fix them, then mint"
+        )
+    return result
+
+
+def _in_temp_project(files: dict[str, str], runner):
     import shutil
     import tempfile
 
@@ -133,9 +148,19 @@ def materialize_and_verify(files: dict[str, str], slug: str) -> unittest.TestRes
             os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
             with open(target, "w", encoding="utf-8", newline="") as fh:
                 fh.write(content)
-        return verify_project(root, slug)
+        return runner(root)
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+def materialize_and_verify(files: dict[str, str], slug: str) -> unittest.TestResult:
+    """Write project files to a temp dir, require green tests, clean up."""
+    return _in_temp_project(files, lambda root: verify_project(root, slug))
+
+
+def materialize_and_run(files: dict[str, str]) -> unittest.TestResult:
+    """Write project files to a temp dir and run tests, red or green."""
+    return _in_temp_project(files, run_project_tests)
 
 
 def validate_pack_record(record: dict) -> dict:

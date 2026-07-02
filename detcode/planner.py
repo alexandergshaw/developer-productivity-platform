@@ -129,6 +129,19 @@ def run(intent: Intent, source: str | None = None, store=None) -> Outcome:
         r = repair.repair(_needs_source(intent, source), _spec(intent))
         return Outcome(r.source, None, r.changed, r.report)
 
+    if op == "add-function":
+        # Derive the function from its examples, then append it to the file —
+        # verified generation plus a collision-refusing codemod.
+        spec = _spec(intent)
+        generated = retrieve.write_function(spec, extra=corpus_entries(store))
+        merged = rewrite.add_function(_needs_source(intent, source), generated.source)
+        report = provenance(
+            "add_function", "1",
+            function=spec.get("name"),
+            generator=generated.report,
+        )
+        return Outcome(merged.source, None, True, report)
+
     if op == "synth":
         # Retrieval-first: known functions (loops, recursion) come from the
         # verified corpora (built-in, then taught); novel ones from synthesis.

@@ -170,10 +170,27 @@ See [examples/](examples/) for the spec, example-set, and repair-spec formats.
 ## Web playground (Vercel)
 
 The web UI ([index.html](index.html)) is a VS Code-style workbench: a file
-explorer that loads folders of code in the browser, a tabbed editor with
-Python syntax highlighting, and a terminal that talks to the engine —
-`new "a resume tailorer"` materializes a whole project into the explorer, and
-English commands act on the active file's buffer. It is served by a stdlib
+explorer that loads folders of code in the browser, a tabbed **editable**
+editor with Python syntax highlighting, and a terminal that talks to the
+engine — `new "a resume tailorer"` materializes a whole project into the
+explorer, and English commands act on the active file's buffer.
+
+Working with code, the engine behaves like a pair programmer, always
+deterministically:
+
+- **edit & add**: type in the buffers; `add a function is_even where
+  is_even(4) == True` derives the function (corpus → synthesis) and appends
+  it with a collision-refusing codemod; Ctrl+S saves back to disk through
+  the File System Access handles (File → Save Project As… for generated
+  projects)
+- **autocomplete**: buffer identifiers, keywords, builtins, and ⚡ corpus
+  completions — accepting `is_prime` on an empty line inserts the whole
+  verified implementation
+- **diagnostics as you type**: syntax errors, unused imports (one-click
+  quick fix), mutable default arguments, bare except, `== None`, TODOs —
+  fixed AST rules, problem counts in the status bar
+- **`test`**: runs the workspace's own suite server-side and reports green,
+  red, and expected failures (planned stubs) It is served by a stdlib
 WSGI app ([main.py](main.py) — the entrypoint Vercel's Python builder
 detects). detcode is stdlib-only, so there is nothing to install or configure:
 

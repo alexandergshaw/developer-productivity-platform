@@ -141,6 +141,45 @@ def run_request(req, store=None) -> dict:
             resp = _generated(builder.render(project), project.report)
             resp["files"] = {f.path: f.content for f in project.files}
             return resp
+        if tool == "complete":
+            from .engines import complete as complete_engine
+
+            items = complete_engine.complete(
+                str(req.get("source") or ""),
+                str(req.get("prefix") or ""),
+                extra=planner.corpus_entries(store),
+            )
+            return {"ok": True, "kind": "complete", "items": items}
+        if tool == "diagnostics":
+            from .engines import diagnose
+
+            items = diagnose.diagnostics(str(req.get("source") or ""))
+            return {"ok": True, "kind": "diagnostics", "items": items}
+        if tool == "runtests":
+            from .engines import mint as mint_engine
+
+            result = mint_engine.materialize_and_run(req.get("files") or {})
+            failures = [
+                {"test": str(test), "message": trace.strip().splitlines()[-1]}
+                for test, trace in result.failures + result.errors
+            ]
+            passed = not failures and result.testsRun > 0
+            summary = (
+                f"ran {result.testsRun} test(s): "
+                + ("all green ✓" if passed else f"{len(failures)} problem(s)")
+                + (
+                    f" ({len(result.expectedFailures)} expected failure(s) — "
+                    "planned stubs)" if result.expectedFailures else ""
+                )
+            )
+            return {
+                "ok": True,
+                "kind": "tests",
+                "output": summary,
+                "passed": passed,
+                "ran": result.testsRun,
+                "failures": failures,
+            }
         if tool == "mint":
             from .engines import mint as mint_engine
 

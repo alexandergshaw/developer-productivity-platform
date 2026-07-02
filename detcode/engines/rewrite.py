@@ -269,6 +269,53 @@ def _import_kwargs(node, names):
 
 
 # --------------------------------------------------------------------------- #
+# add_function
+# --------------------------------------------------------------------------- #
+def _top_level_names(tree: ast.Module) -> set[str]:
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            names.update(_bound_name(alias) for alias in node.names)
+    return names
+
+
+def add_function(source: str, func_source: str) -> Result:
+    """Append a top-level function to a module.
+
+    Refuses when ``func_source`` is not exactly one function definition or
+    when its name would collide with anything already bound at module level.
+    Existing content is untouched; the function lands at the end with
+    standard two-blank-line separation.
+    """
+    tree = ast.parse(source)
+    try:
+        new_tree = ast.parse(func_source)
+    except SyntaxError as exc:
+        raise Unsafe(f"the function source does not parse: {exc}") from exc
+    if len(new_tree.body) != 1 or not isinstance(
+        new_tree.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)
+    ):
+        raise Unsafe("expected exactly one function definition to add")
+    name = new_tree.body[0].name
+    if name in _top_level_names(tree):
+        raise Unsafe(f"{name!r} already exists at module level; refusing to shadow it")
+
+    base = source.rstrip("\n")
+    body = func_source.strip("\n")
+    new_source = (base + "\n\n\n" + body + "\n") if base else (body + "\n")
+    ast.parse(new_source)
+
+    report = provenance("add_function", RULE_VERSION, function=name)
+    return Result(new_source, changed=True, report=report)
+
+
+# --------------------------------------------------------------------------- #
 # sort_imports
 # --------------------------------------------------------------------------- #
 def _import_units(node) -> list[tuple[int, str, str]]:

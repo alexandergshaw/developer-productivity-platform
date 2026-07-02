@@ -50,6 +50,7 @@ GRAMMAR = (
     "document",
     "fix <func> so that <func>(args) == value [and ...]",
     "write a function <name> where <name>(args) == value [and ...]",
+    "add a function <name> where <name>(args) == value  (appends to the file)",
     "generate tests for <func> where <func>(args) == value [and ...]",
     "build a <project direction>  (e.g. build a resume tailorer)",
     "plan a <project direction>  (spec interview for unknown domains)",
@@ -181,6 +182,15 @@ _PATTERNS = (
     (
         re.compile(r"^plan\s+(?:a|an)\s+(?P<direction>.+)$", re.IGNORECASE),
         lambda m: Intent.of("plan", direction=m["direction"]),
+    ),
+    (
+        re.compile(
+            r"^add\s+a\s+function\s+(?P<name>\w+)\s+where\s+(?P<cond>.+)$", re.IGNORECASE
+        ),
+        lambda m: _spec_intent(
+            "add-function",
+            {"name": m["name"], "examples": _conditions(m["cond"], m["name"])},
+        ),
     ),
     (
         re.compile(r"^teach\s+(?P<func>\w+)\s+where\s+(?P<cond>.+)$", re.IGNORECASE),

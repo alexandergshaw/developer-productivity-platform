@@ -18,7 +18,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 
-TOOL_VERSION = "0.7.0"
+TOOL_VERSION = "0.8.0"
 
 
 class BudgetExceeded(RuntimeError):

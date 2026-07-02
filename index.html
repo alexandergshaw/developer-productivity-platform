@@ -138,8 +138,9 @@
 
   /* ---------- editor groups ---------- */
   #main { grid-area: main; display: flex; min-width: 0; min-height: 0; background: var(--ed-bg); }
-  .group { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-  .group + .group { border-left: 1px solid var(--panel-border); }
+  .group { flex: 1 1 0; display: flex; flex-direction: column; min-width: 120px; min-height: 0; }
+  .gsash { flex: none; width: 4px; cursor: col-resize; background: var(--panel-border); transition: background .15s .2s; }
+  .gsash:hover, .gsash.dragging { background: var(--sash); }
   .gtabs { display: flex; background: var(--sb-bg); overflow-x: auto; flex: none; height: 35px; }
   .gtabs::-webkit-scrollbar { height: 3px; }
   .gactions { margin-left: auto; display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
@@ -412,8 +413,10 @@
 "use strict";
 // ---------- state ----------
 const files = new Map();          // path -> { content, dirty, generated }
-let groups = [{ tabs: [], active: null }];   // editor groups (max 2)
+const newGroup = (tabs = [], active = null, size = 1) => ({ tabs, active, size });
+let groups = [newGroup()];        // editor groups (N-way, split right)
 let activeGroup = 0;
+const floats = new Map();         // path -> floating editor window
 let active = null;                // mirror of groups[activeGroup].active
 const collapsed = new Set();
 let history = [], hIdx = 0;
@@ -498,14 +501,48 @@ const LANG_NAMES = { py: "Python", md: "Markdown", json: "JSON", js: "JavaScript
 
 function renderGroups() {
   syncActive();
-  $("main").innerHTML = groups.map((_g, gi) => `
-    <div class="group ${gi === activeGroup ? "focused" : ""}" data-g="${gi}">
+  $("main").innerHTML = groups.map((g, gi) => `
+    <div class="group ${gi === activeGroup ? "focused" : ""}" data-g="${gi}" style="flex-grow:${g.size}">
       <div class="gtabs" id="tabs${gi}" data-g="${gi}"></div>
       <div class="gbc" id="breadcrumbs${gi}" hidden></div>
       <div class="ged" id="editor${gi}"></div>
-    </div>`).join("");
+    </div>`).join('<div class="gsash"></div>');
   groups.forEach((_g, gi) => { renderTabsFor(gi); renderEditorFor(gi); });
   wireGroupEvents();
+  wireGroupSashes();
+}
+
+function wireGroupSashes() {
+  const groupEls = [...document.querySelectorAll("#main > .group")];
+  document.querySelectorAll("#main > .gsash").forEach((sash, si) => {
+    sash.addEventListener("mousedown", e => {
+      e.preventDefault();
+      sash.classList.add("dragging");
+      document.body.classList.add("resizing");
+      const leftEl = groupEls[si], rightEl = groupEls[si + 1];
+      const startX = e.clientX;
+      const leftW = leftEl.getBoundingClientRect().width;
+      const rightW = rightEl.getBoundingClientRect().width;
+      const pair = leftW + rightW;
+      const pairGrow = groups[si].size + groups[si + 1].size;
+      const onMove = ev => {
+        const delta = Math.max(120 - leftW, Math.min(rightW - 120, ev.clientX - startX));
+        groups[si].size = pairGrow * (leftW + delta) / pair;
+        groups[si + 1].size = pairGrow * (rightW - delta) / pair;
+        leftEl.style.flexGrow = groups[si].size;
+        rightEl.style.flexGrow = groups[si + 1].size;
+      };
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        sash.classList.remove("dragging");
+        document.body.classList.remove("resizing");
+        refreshMinimaps();
+      };
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    });
+  });
 }
 
 function wireGroupEvents() {
@@ -558,6 +595,18 @@ function wireGroupEvents() {
   });
 }
 
+function collapseEmptyGroups(keep) {
+  // Remove emptied groups (except a sole survivor), giving their width to a
+  // neighbor — VS Code's collapse behavior.
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups.length > 1 && groups[i].tabs.length === 0 && groups[i] !== keep) {
+      const neighbor = groups[i - 1] || groups[i + 1];
+      if (neighbor) neighbor.size += groups[i].size;
+      groups.splice(i, 1);
+    }
+  }
+}
+
 function moveTab(path, fromG, toG, index) {
   const src = groups[fromG], dst = groups[toG];
   if (!src || !dst || !files.has(path)) return;
@@ -569,17 +618,19 @@ function moveTab(path, fromG, toG, index) {
   if (!dst.tabs.includes(path)) dst.tabs.splice(Math.max(0, Math.min(index, dst.tabs.length)), 0, path);
   dst.active = path;
   if (src !== dst && src.active === path) src.active = src.tabs[src.tabs.length - 1] || null;
-  // collapse an emptied second group
-  if (groups.length > 1 && groups[1].tabs.length === 0) { groups.splice(1, 1); activeGroup = 0; }
-  else activeGroup = Math.min(toG, groups.length - 1);
+  collapseEmptyGroups(dst);
+  activeGroup = Math.max(0, groups.indexOf(dst));
   syncActive();
   renderGroups(); renderTree();
 }
 
 function splitEditor() {
-  if (groups.length >= 2 || !active) return;
-  groups.push({ tabs: [active], active });
-  activeGroup = 1;
+  if (!active) return;
+  const current = groups[activeGroup];
+  const half = current.size / 2;
+  current.size = half;
+  groups.splice(activeGroup + 1, 0, newGroup([active], active, half));
+  activeGroup = activeGroup + 1;
   syncActive();
   renderGroups(); renderTree();
 }
@@ -587,11 +638,99 @@ function splitEditor() {
 function runGroupAction(action, gi) {
   if (action === "split") { focusGroup(gi); splitEditor(); }
   if (action === "closegroup") {
+    const removed = groups[gi];
+    const neighbor = groups[gi - 1] || groups[gi + 1];
+    if (neighbor && removed) neighbor.size += removed.size;
     groups.splice(gi, 1);
-    if (!groups.length) groups = [{ tabs: [], active: null }];
-    activeGroup = 0;
+    if (!groups.length) groups = [newGroup()];
+    activeGroup = Math.max(0, Math.min(activeGroup, groups.length - 1));
     syncActive();
     renderGroups(); renderTree();
+  }
+  if (action === "float") {
+    const g = groups[gi];
+    if (g && g.active) floatTab(g.active, gi);
+  }
+}
+
+// ---------- floating editor windows (tear-out) ----------
+function floatTab(path, gi) {
+  if (!files.has(path)) return;
+  const existing = floats.get(path);
+  if (existing && !existing.closed) { existing.focus(); return; }
+  const win = window.open("", "_blank",
+    "width=780,height=560,menubar=no,toolbar=no,location=no,status=no");
+  if (!win) {
+    termPrint('<span class="err">the browser blocked the floating window — allow pop-ups for this site</span>');
+    return;
+  }
+  floats.set(path, win);
+  const doc = win.document;
+  doc.title = `${path.split("/").pop()} — detcode`;
+  doc.body.style.cssText =
+    "margin:0;background:#1e1e1e;color:#d4d4d4;font:14px/19px Consolas,monospace;height:100vh;overflow:hidden;display:flex;flex-direction:column";
+  doc.body.innerHTML = `
+    <div style="flex:none;background:#3c3c3c;color:#ccc;font:12px 'Segoe UI',sans-serif;padding:6px 12px">${esc(path)} — floating editor (Ctrl+S saves; closing keeps the buffer)</div>
+    <div style="flex:1;position:relative;min-height:0">
+      <pre id="fhl" style="position:absolute;inset:0;margin:0;padding:6px 10px;font:inherit;white-space:pre;overflow:hidden;pointer-events:none;z-index:1"></pre>
+      <textarea id="fta" spellcheck="false" style="position:absolute;inset:0;margin:0;padding:6px 10px;font:inherit;white-space:pre;overflow:auto;border:0;outline:0;resize:none;background:transparent;color:transparent;caret-color:#aeafad;z-index:2;tab-size:4"></textarea>
+    </div>`;
+  const style = doc.createElement("style");
+  style.textContent = ".k{color:#569cd6}.s{color:#ce9178}.c{color:#6a9955}.n{color:#b5cea8}.f{color:#dcdcaa}.d{color:#d7ba7d}.t{color:#4ec9b0} ::selection{background:#264f78;color:transparent}";
+  doc.head.appendChild(style);
+  const ta = doc.getElementById("fta"), hl = doc.getElementById("fhl");
+  const paint = () => {
+    hl.innerHTML = (path.endsWith(".py")
+      ? highlightPython(ta.value) : ta.value.split("\n").map(esc)).join("\n") + "\n";
+  };
+  ta.value = files.get(path).content;
+  paint();
+  ta.addEventListener("scroll", () => { hl.scrollTop = ta.scrollTop; hl.scrollLeft = ta.scrollLeft; });
+  ta.addEventListener("input", () => {
+    const buffer = files.get(path);
+    if (!buffer) return;
+    buffer.content = ta.value;
+    if (!buffer.dirty) { buffer.dirty = true; renderScm(); renderTree(); groups.forEach((_g, i) => renderTabsFor(i)); }
+    paint();
+    // sync any group editor showing the same document
+    groups.forEach((g, oi) => {
+      if (g.active === path) {
+        const ota = $(`edta${oi}`);
+        if (ota && ota.value !== ta.value) { ota.value = ta.value; syncHl(oi); }
+      }
+    });
+  });
+  ta.addEventListener("keydown", e => {
+    if (e.ctrlKey && e.key.toLowerCase() === "s") { e.preventDefault(); savePath(path); }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      const s = ta.selectionStart;
+      ta.value = ta.value.slice(0, s) + "    " + ta.value.slice(ta.selectionEnd);
+      ta.setSelectionRange(s + 4, s + 4);
+      ta.dispatchEvent(new Event("input"));
+    }
+  });
+  win.addEventListener("unload", () => { if (floats.get(path) === win) floats.delete(path); });
+  // remove from its group — the document lives on in the float
+  const g = groups[gi];
+  if (g) {
+    g.tabs = g.tabs.filter(p => p !== path);
+    if (g.active === path) g.active = g.tabs[g.tabs.length - 1] || null;
+    collapseEmptyGroups();
+    activeGroup = Math.max(0, Math.min(activeGroup, groups.length - 1));
+    syncActive();
+    renderGroups(); renderTree();
+  }
+  termPrint(`<span class="dim">${esc(path)} moved into a floating window</span>`);
+}
+
+function updateFloat(path) {
+  const win = floats.get(path);
+  if (!win || win.closed) return;
+  const ta = win.document.getElementById("fta");
+  if (ta && ta.value !== files.get(path).content) {
+    ta.value = files.get(path).content;
+    ta.dispatchEvent(new Event("input"));
   }
 }
 
@@ -608,8 +747,9 @@ function focusGroup(gi) {
 function renderTabsFor(gi) {
   const g = groups[gi];
   const actions = `<div class="gactions">
-      ${groups.length < 2 ? `<span class="gact" data-gact="split" title="Split Editor (Ctrl+\\)">${SPLIT_ICON}</span>` : ""}
-      ${gi > 0 ? `<span class="gact" data-gact="closegroup" title="Close Group">✕</span>` : ""}
+      ${g.active ? `<span class="gact" data-gact="float" title="Move into Floating Window">⇱</span>` : ""}
+      <span class="gact" data-gact="split" title="Split Editor (Ctrl+\\)">${SPLIT_ICON}</span>
+      ${groups.length > 1 ? `<span class="gact" data-gact="closegroup" title="Close Group">✕</span>` : ""}
     </div>`;
   $(`tabs${gi}`).innerHTML = g.tabs.map(p => {
     const name = p.split("/").pop();
@@ -624,6 +764,13 @@ function renderTabsFor(gi) {
     tab.addEventListener("dragstart", e => {
       e.dataTransfer.setData("application/x-detcode-tab", JSON.stringify({ path: tab.dataset.p, from: gi }));
       e.dataTransfer.effectAllowed = "move";
+    });
+    tab.addEventListener("dragend", e => {
+      // Tear-out: the drag ended with no drop target and the pointer left the
+      // window — float the tab, VS Code style.
+      const outside = e.clientX <= 0 || e.clientY <= 0
+        || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight;
+      if (e.dataTransfer.dropEffect === "none" && outside) floatTab(tab.dataset.p, gi);
     });
   });
 }
@@ -777,13 +924,14 @@ function onEdit(gi) {
   }
   syncHl(gi);
   if (gi === activeGroup) { scheduleComplete(); scheduleDiagnostics(); }
-  // a shared file open in the other group refreshes there too
+  // a shared file open in another group or a float refreshes there too
   groups.forEach((other, oi) => {
     if (oi !== gi && other.active === g.active) {
       const ota = $(`edta${oi}`);
       if (ota && ota.value !== value) { ota.value = value; syncHl(oi); }
     }
   });
+  updateFloat(g.active);
 }
 
 function onEditorKey(e, gi) {
@@ -986,10 +1134,10 @@ async function _writeHandle(handle, content) {
   }
 }
 
-async function saveActive() {
-  if (!active || !files.has(active)) return;
-  const buffer = files.get(active);
-  const handle = fileHandles.get(active);
+async function savePath(path) {
+  if (!path || !files.has(path)) return;
+  const buffer = files.get(path);
+  const handle = fileHandles.get(path);
   if (!handle) {
     termPrint('<span class="err">no disk handle for this buffer — use File → Save Project As…</span>');
     return;
@@ -998,11 +1146,13 @@ async function saveActive() {
     await _writeHandle(handle, buffer.content);
     buffer.dirty = false;
     groups.forEach((_g, gi) => renderTabsFor(gi)); renderTree(); renderScm();
-    termPrint(`<span class="ok">✓ saved ${esc(active)}</span>`);
+    termPrint(`<span class="ok">✓ saved ${esc(path)}</span>`);
   } catch (err) {
     termPrint(`<span class="err">save failed: ${esc(String(err))}</span>`);
   }
 }
+
+async function saveActive() { await savePath(active); }
 
 async function saveProjectAs() {
   if (!window.showDirectoryPicker) {
@@ -1099,7 +1249,9 @@ async function menuItems(which) {
     { label: "Extensions: Packs", action: () => showView("ext") },
     { label: "detcode Engine", action: () => showView("detcode") },
     "-",
-    { label: "Split Editor", hint: "Ctrl+\\", disabled: !active || groups.length >= 2, action: splitEditor },
+    { label: "Split Editor", hint: "Ctrl+\\", disabled: !active, action: splitEditor },
+    { label: "Move Active Tab into Floating Window", disabled: !active,
+      action: () => floatTab(active, activeGroup) },
     "-",
     { label: "Problems", action: () => showPanel("problems") },
     { label: "Output", action: () => showPanel("output") },
@@ -1592,7 +1744,8 @@ const HELP = [
   ["query <question>", "knowledge web: evidence with citations"],
   ["mint <kw1,kw2>", "mint the workspace as a pack (its tests must pass)"],
   ["test", "run the workspace tests server-side"],
-  ["split", "split the editor (also Ctrl+\\)"],
+  ["split", "split the editor right (also Ctrl+\\; repeat for N panes)"],
+  ["float", "move the active tab into a floating window (or drag it out)"],
   ["save / save project", "write buffers back to disk (also Ctrl+S)"],
   ["<anything else>", "English, acting on the active file (ask/fix/explain/...)"],
 ].map(([c, d]) => `  <span class="ok">${c.padEnd(22)}</span><span class="dim">${d}</span>`).join("\n");
@@ -1612,6 +1765,11 @@ async function runCommand(raw) {
   if (cmd === "help") { termPrint(HELP); return; }
   if (cmd === "clear") { $("term-out").innerHTML = ""; return; }
   if (cmd === "split") { splitEditor(); return; }
+  if (cmd === "float") {
+    if (active) floatTab(active, activeGroup);
+    else termPrint('<span class="err">no active file to float</span>');
+    return;
+  }
   if (cmd === "ls") {
     termPrint([...files.keys()].sort().map(p => "  " + esc(p)).join("\n") || '<span class="dim">no files loaded</span>');
     return;
@@ -1693,6 +1851,7 @@ async function runCommand(raw) {
             files.set(active, { content: resp.output, dirty: changed });
             groups.forEach((_g, gi) => renderTabsFor(gi)); renderTree(); renderScm();
             renderEditorFor(activeGroup);
+            updateFloat(active);
             termPrint(changed
               ? `<span class="ok">✎ applied to ${esc(active)} (in-memory buffer)</span>`
               : `<span class="dim">no change needed in ${esc(active)}</span>`);
@@ -1764,6 +1923,7 @@ function quickCandidates(value) {
       ["detcode: Mint This Project", "mint "],
       ["detcode: Save Project As", "save project"],
       ["View: Split Editor", "split"],
+      ["View: Float Active Tab", "float"],
       ["File: Save", "save"],
       ["Help: Show Terminal Commands", "help"],
     ];

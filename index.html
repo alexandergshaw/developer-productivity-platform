@@ -216,6 +216,7 @@
   .minimap .view { position: absolute; left: 0; right: 0; background: #ffffff12; pointer-events: none; }
   .k { color: var(--kw); } .s { color: var(--str); } .c { color: var(--com); }
   .n { color: var(--num); } .f { color: var(--fn); } .d { color: var(--dec); } .t { color: var(--cls); }
+  .kc { color: #c586c0; } .v { color: #9cdcfe; } .re { color: #d16969; } .b { font-weight: 600; }
   .welcome { padding: 60px 0 0; color: #9a9a9a; font-size: 13px; text-align: center; height: 100%; font-family: var(--ui); }
   .welcome .biglogo { font-size: 120px; color: #ffffff0f; line-height: 1; user-select: none; }
   .welcome table { margin: 30px auto 0; border-spacing: 6px 8px; }
@@ -568,7 +569,8 @@ function syncActive() { active = groups[activeGroup] ? groups[activeGroup].activ
 const ICON_COLORS = { py: "#519aba", md: "#519aba", json: "#cbcb41", js: "#cbcb41",
   ts: "#519aba", tsx: "#519aba", jsx: "#cbcb41", html: "#e37933", css: "#519aba",
   yml: "#a074c4", yaml: "#a074c4", toml: "#6d8086", cfg: "#6d8086", txt: "#6d8086",
-  csv: "#8dc149", gitignore: "#6d8086" };
+  csv: "#8dc149", gitignore: "#6d8086", go: "#519aba", rs: "#cc3e44", sh: "#4d5a5e",
+  mod: "#519aba", sum: "#6d8086", editorconfig: "#6d8086", dockerignore: "#6d8086" };
 function fileIcon(name) {
   const ext = (name.split(".").pop() || "").toLowerCase();
   const color = ICON_COLORS[ext] || "#6d8086";
@@ -582,49 +584,66 @@ const CHEV_DOWN = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 
 const SPLIT_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="2.5" width="13" height="11"/><path d="M8 2.5v11"/></svg>';
 const SPLIT_DOWN_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="2.5" width="13" height="11"/><path d="M1.5 8h13"/></svg>';
 
-// ---------- python highlighter ----------
-const PY_KW = new Set(("def class return if elif else for while import from as with try except finally raise " +
-  "pass break continue lambda yield global nonlocal assert del in is not and or None True False async await self cls").split(" "));
+// ---------- syntax highlighting (VS Code Dark+ token colors) ----------
+// Classes: k keyword (blue) · kc control-flow (purple) · s string · c comment
+// · n number · f function · t type/class · v property/key · d decorator/selector
+// · re regex — matching Dark+'s palette and its keyword/control split.
+const span = (cls, text) => cls ? `<span class="${cls}">${esc(text)}</span>` : esc(text);
+const plainLines = text => text.split("\n").map(esc);
+
+// --- python (Dark+: def/class/lambda blue; flow keywords purple) ---
+const PY_CONTROL = new Set(("return if elif else for while import from with try except finally raise " +
+  "pass break continue yield global nonlocal assert del in async await").split(" "));
+const PY_KEYWORD = new Set("def class lambda None True False self cls and or not is".split(" "));
 
 function highlightPython(text) {
   const out = []; let triple = null;
   for (const line of text.split("\n")) {
-    let html = "", i = 0, prevWord = "";
+    let html = "", i = 0, prevWord = "", prevSig = "";
     if (triple) {
       const idx = line.indexOf(triple);
-      if (idx >= 0) { html += `<span class="s">${esc(line.slice(0, idx + 3))}</span>`; i = idx + 3; triple = null; }
-      else { out.push(`<span class="s">${esc(line)}</span>`); continue; }
+      if (idx >= 0) { html += span("s", line.slice(0, idx + 3)); i = idx + 3; triple = null; }
+      else { out.push(span("s", line)); continue; }
     }
     while (i < line.length) {
       const ch = line[i];
-      if (ch === "#") { html += `<span class="c">${esc(line.slice(i))}</span>`; break; }
+      if (ch === "#") { html += span("c", line.slice(i)); break; }
       const three = line.slice(i, i + 3);
       if (three === '"""' || three === "'''") {
         const close = line.indexOf(three, i + 3);
-        if (close >= 0) { html += `<span class="s">${esc(line.slice(i, close + 3))}</span>`; i = close + 3; }
-        else { html += `<span class="s">${esc(line.slice(i))}</span>`; triple = three; i = line.length; }
+        if (close >= 0) { html += span("s", line.slice(i, close + 3)); i = close + 3; }
+        else { html += span("s", line.slice(i)); triple = three; i = line.length; }
         continue;
       }
       if (ch === '"' || ch === "'") {
         let j = i + 1;
         while (j < line.length && line[j] !== ch) { if (line[j] === "\\") j++; j++; }
-        html += `<span class="s">${esc(line.slice(i, Math.min(j + 1, line.length)))}</span>`; i = j + 1; continue;
+        html += span("s", line.slice(i, Math.min(j + 1, line.length)));
+        prevSig = ch; i = j + 1; continue;
       }
       if (ch === "@" && /^@[A-Za-z_]/.test(line.slice(i))) {
         const d = /^@[A-Za-z_][\w.]*/.exec(line.slice(i));
-        html += `<span class="d">${esc(d[0])}</span>`; i += d[0].length; continue;
+        html += span("d", d[0]); i += d[0].length; continue;
       }
       const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(line.slice(i));
       if (word) {
         const w = word[0];
-        if (PY_KW.has(w)) html += `<span class="k">${w}</span>`;
-        else if (prevWord === "def") html += `<span class="f">${w}</span>`;
-        else if (prevWord === "class") html += `<span class="t">${w}</span>`;
-        else html += esc(w);
-        prevWord = w; i += w.length; continue;
+        const after = line.slice(i + w.length);
+        let cls = "";
+        if (/^[rbfuRBFU]{1,2}$/.test(w) && (after[0] === '"' || after[0] === "'")) cls = "s";
+        else if (PY_KEYWORD.has(w)) cls = "k";
+        else if (PY_CONTROL.has(w)) cls = "kc";
+        else if (prevWord === "def") cls = "f";
+        else if (prevWord === "class") cls = "t";
+        else if (/^\s*\(/.test(after)) cls = "f";
+        else if (prevSig === ".") cls = "v";
+        else if (/^[A-Z]/.test(w)) cls = "t";
+        html += span(cls, w);
+        prevWord = w; prevSig = "a"; i += w.length; continue;
       }
-      const num = /^\d[\d_]*(\.\d+)?/.exec(line.slice(i));
-      if (num) { html += `<span class="n">${num[0]}</span>`; i += num[0].length; continue; }
+      const num = /^\d[\w.]*/.exec(line.slice(i));
+      if (num) { html += span("n", num[0]); prevSig = "0"; i += num[0].length; continue; }
+      if (ch !== " " && ch !== "\t") prevSig = ch;
       html += esc(ch); i++;
     }
     out.push(html);
@@ -632,9 +651,502 @@ function highlightPython(text) {
   return out;
 }
 
+// --- generic C-family tokenizer (js/ts/go/rust/c...) ---
+function makeClike(cfg) {
+  const declAfter = cfg.declAfter || new Set();
+  const fnAfter = cfg.fnAfter || new Set();
+  const types = cfg.types || new Set();
+  return function (text) {
+    const out = []; let mode = null;   // "block" (/* */) | "tpl" (` `)
+    for (const line of text.split("\n")) {
+      let html = "", i = 0, prevWord = "", prevSig = "";
+      if (mode === "block") {
+        const end = line.indexOf("*/");
+        if (end >= 0) { html += span("c", line.slice(0, end + 2)); i = end + 2; mode = null; }
+        else { out.push(span("c", line)); continue; }
+      } else if (mode === "tpl") {
+        const end = line.indexOf("`");
+        if (end >= 0) { html += span("s", line.slice(0, end + 1)); i = end + 1; mode = null; }
+        else { out.push(span("s", line)); continue; }
+      }
+      while (i < line.length) {
+        const ch = line[i], two = line.slice(i, i + 2);
+        if (two === "//") { html += span("c", line.slice(i)); i = line.length; break; }
+        if (cfg.blockComments && two === "/*") {
+          const end = line.indexOf("*/", i + 2);
+          if (end >= 0) { html += span("c", line.slice(i, end + 2)); i = end + 2; }
+          else { html += span("c", line.slice(i)); i = line.length; mode = "block"; }
+          continue;
+        }
+        if (cfg.attributes && ch === "#" && (line[i + 1] === "[" || two === "#!")) {
+          const end = line.indexOf("]", i);
+          const stop = end >= 0 ? end + 1 : line.length;
+          html += span("d", line.slice(i, stop)); i = stop; continue;
+        }
+        if (cfg.strings.includes(ch)) {
+          let j = i + 1;
+          while (j < line.length && line[j] !== ch) { if (line[j] === "\\") j++; j++; }
+          html += span("s", line.slice(i, Math.min(j + 1, line.length)));
+          prevSig = ch; i = j + 1; continue;
+        }
+        if (cfg.backtick && ch === "`") {
+          const end = line.indexOf("`", i + 1);
+          if (end >= 0) { html += span("s", line.slice(i, end + 1)); i = end + 1; }
+          else { html += span("s", line.slice(i)); i = line.length; mode = "tpl"; }
+          prevSig = "`"; continue;
+        }
+        if (cfg.regex && ch === "/" && line[i + 1] !== "/" && line[i + 1] !== "*"
+            && (!prevSig || "=(,:[!&|?{};".includes(prevSig) || prevWord === "return")) {
+          let j = i + 1, closed = false;
+          while (j < line.length) {
+            if (line[j] === "\\") { j += 2; continue; }
+            if (line[j] === "/") { closed = true; break; }
+            j++;
+          }
+          if (closed) {
+            let k = j + 1;
+            while (k < line.length && /[a-z]/.test(line[k])) k++;
+            html += span("re", line.slice(i, k)); prevSig = "/"; i = k; continue;
+          }
+        }
+        const word = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(line.slice(i));
+        if (word) {
+          const w = word[0];
+          const after = line.slice(i + w.length);
+          const call = /^\s*\(/.test(after) || (cfg.macros && /^!\s*[([{]/.test(after));
+          let cls = "";
+          if (cfg.control.has(w)) cls = "kc";
+          else if (cfg.keywords.has(w)) cls = "k";
+          else if (types.has(w)) cls = "t";
+          else if (declAfter.has(prevWord)) cls = "t";
+          else if (fnAfter.has(prevWord)) cls = "f";
+          else if (call) cls = "f";
+          else if (prevSig === ".") cls = "v";
+          else if (/^[A-Z]/.test(w)) cls = "t";
+          html += span(cls, w);
+          prevWord = w; prevSig = "a"; i += w.length; continue;
+        }
+        const num = /^\d[\w.]*/.exec(line.slice(i));
+        if (num) { html += span("n", num[0]); prevSig = "0"; i += num[0].length; continue; }
+        if (ch !== " " && ch !== "\t") prevSig = ch;
+        html += esc(ch); i++;
+      }
+      out.push(html);
+    }
+    return out;
+  };
+}
+
+const HL_JS = makeClike({
+  blockComments: true, strings: ['"', "'"], backtick: true, regex: true,
+  control: new Set(("if else for while do switch case default return break continue throw try catch " +
+    "finally yield await export import from").split(" ")),
+  keywords: new Set(("const let var function class extends new this super async static get set typeof " +
+    "instanceof void delete in of as true false null undefined NaN Infinity").split(" ")),
+  declAfter: new Set(["class", "extends", "new", "instanceof"]),
+  fnAfter: new Set(["function"]),
+});
+const HL_TS = makeClike({
+  blockComments: true, strings: ['"', "'"], backtick: true, regex: true,
+  control: new Set(("if else for while do switch case default return break continue throw try catch " +
+    "finally yield await export import from").split(" ")),
+  keywords: new Set(("const let var function class extends new this super async static get set typeof " +
+    "instanceof void delete in of as true false null undefined NaN Infinity interface type namespace " +
+    "declare readonly abstract implements public private protected enum keyof satisfies infer is override").split(" ")),
+  types: new Set("string number boolean any unknown never object symbol bigint".split(" ")),
+  declAfter: new Set(["class", "extends", "new", "instanceof", "interface", "implements", "enum", "namespace"]),
+  fnAfter: new Set(["function"]),
+});
+const HL_GO = makeClike({
+  blockComments: true, strings: ['"', "'"], backtick: true,
+  control: new Set("if else for range switch case default return break continue goto fallthrough defer go select".split(" ")),
+  keywords: new Set("func var const type struct interface map chan package import nil true false iota".split(" ")),
+  types: new Set(("string bool byte rune error any int int8 int16 int32 int64 uint uint8 uint16 uint32 " +
+    "uint64 uintptr float32 float64 complex64 complex128").split(" ")),
+  declAfter: new Set(["type"]),
+  fnAfter: new Set(["func"]),
+});
+const HL_RUST = makeClike({
+  blockComments: true, strings: ['"'], attributes: true, macros: true,
+  control: new Set("if else for while loop match return break continue await".split(" ")),
+  keywords: new Set(("fn let mut const static struct enum trait impl mod pub use crate as in where " +
+    "unsafe async move dyn ref type self Self super true false extern").split(" ")),
+  types: new Set("i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 bool char str".split(" ")),
+  declAfter: new Set(["struct", "enum", "trait", "impl", "mod"]),
+  fnAfter: new Set(["fn"]),
+});
+const HL_C = makeClike({
+  blockComments: true, strings: ['"', "'"],
+  control: new Set("if else for while do switch case default return break continue goto try catch throw finally".split(" ")),
+  keywords: new Set(("void int char long short float double unsigned signed struct union enum typedef static " +
+    "extern const inline sizeof class public private protected virtual new delete namespace using template " +
+    "typename this true false nullptr NULL").split(" ")),
+  declAfter: new Set(["class", "struct", "enum", "new"]),
+  fnAfter: new Set(),
+});
+
+// --- json ---
+function highlightJSON(text) {
+  return text.split("\n").map(line => {
+    let html = "", i = 0;
+    while (i < line.length) {
+      const ch = line[i];
+      if (ch === '"') {
+        let j = i + 1;
+        while (j < line.length && line[j] !== '"') { if (line[j] === "\\") j++; j++; }
+        const isKey = /^\s*:/.test(line.slice(j + 1));
+        html += span(isKey ? "v" : "s", line.slice(i, Math.min(j + 1, line.length)));
+        i = j + 1; continue;
+      }
+      const word = /^[a-z]+/.exec(line.slice(i));
+      if (word && ["true", "false", "null"].includes(word[0])) {
+        html += span("k", word[0]); i += word[0].length; continue;
+      }
+      const num = /^-?\d[\d.eE+-]*/.exec(line.slice(i));
+      if (num && (/\d/.test(ch) || ch === "-")) { html += span("n", num[0]); i += num[0].length; continue; }
+      html += esc(ch); i++;
+    }
+    return html;
+  });
+}
+
+// --- html/xml (tags blue, attributes light blue, values orange) ---
+function highlightHTML(text) {
+  const out = []; let inComment = false;
+  for (const line of text.split("\n")) {
+    let html = "", i = 0;
+    if (inComment) {
+      const end = line.indexOf("-->");
+      if (end >= 0) { html += span("c", line.slice(0, end + 3)); i = end + 3; inComment = false; }
+      else { out.push(span("c", line)); continue; }
+    }
+    while (i < line.length) {
+      if (line.startsWith("<!--", i)) {
+        const end = line.indexOf("-->", i + 4);
+        if (end >= 0) { html += span("c", line.slice(i, end + 3)); i = end + 3; }
+        else { html += span("c", line.slice(i)); i = line.length; inComment = true; }
+        continue;
+      }
+      const tag = /^<\/?!?[A-Za-z][\w-]*/.exec(line.slice(i));
+      if (line[i] === "<" && tag) {
+        const punct = /^<\/?!?/.exec(tag[0])[0];
+        html += esc(punct) + span("k", tag[0].slice(punct.length));
+        i += tag[0].length;
+        while (i < line.length && line[i] !== ">") {
+          const ch = line[i];
+          if (ch === '"' || ch === "'") {
+            let j = i + 1;
+            while (j < line.length && line[j] !== ch) j++;
+            html += span("s", line.slice(i, Math.min(j + 1, line.length))); i = j + 1; continue;
+          }
+          const attr = /^[A-Za-z_:][\w:.-]*/.exec(line.slice(i));
+          if (attr) { html += span("v", attr[0]); i += attr[0].length; continue; }
+          html += esc(ch); i++;
+        }
+        if (line[i] === ">") { html += "&gt;"; i++; }
+        continue;
+      }
+      const next = line.indexOf("<", i + 1);
+      const stop = next === -1 ? line.length : next;
+      html += esc(line.slice(i, Math.max(stop, i + 1)));
+      i = Math.max(stop, i + 1);
+    }
+    out.push(html);
+  }
+  return out;
+}
+
+// --- css (selectors gold, properties light blue, values orange) ---
+function highlightCSS(text) {
+  const out = []; let inComment = false, inBlock = false;
+  for (const line of text.split("\n")) {
+    let html = "", i = 0, value = false;
+    if (inComment) {
+      const end = line.indexOf("*/");
+      if (end >= 0) { html += span("c", line.slice(0, end + 2)); i = end + 2; inComment = false; }
+      else { out.push(span("c", line)); continue; }
+    }
+    while (i < line.length) {
+      if (line.startsWith("/*", i)) {
+        const end = line.indexOf("*/", i + 2);
+        if (end >= 0) { html += span("c", line.slice(i, end + 2)); i = end + 2; }
+        else { html += span("c", line.slice(i)); i = line.length; inComment = true; }
+        continue;
+      }
+      const ch = line[i];
+      if (ch === "{") { inBlock = true; value = false; html += "{"; i++; continue; }
+      if (ch === "}") { inBlock = false; value = false; html += "}"; i++; continue; }
+      if (!inBlock) {
+        let stop = line.length;
+        const brace = line.indexOf("{", i), com = line.indexOf("/*", i);
+        if (brace >= 0) stop = Math.min(stop, brace);
+        if (com >= 0) stop = Math.min(stop, com);
+        const chunk = line.slice(i, stop);
+        const at = /^(\s*)(@[\w-]+)(.*)$/.exec(chunk);
+        if (!chunk.trim()) html += esc(chunk);
+        else if (at) html += at[1] + span("kc", at[2]) + span("d", at[3]);
+        else html += span("d", chunk);
+        i = stop; continue;
+      }
+      if (ch === ";") { value = false; html += ";"; i++; continue; }
+      if (ch === ":") { value = true; html += ":"; i++; continue; }
+      if (!value) {
+        const prop = /^[-A-Za-z][\w-]*/.exec(line.slice(i));
+        if (prop) { html += span("v", prop[0]); i += prop[0].length; continue; }
+        html += esc(ch); i++; continue;
+      }
+      if (ch === '"' || ch === "'") {
+        let j = i + 1;
+        while (j < line.length && line[j] !== ch) j++;
+        html += span("s", line.slice(i, Math.min(j + 1, line.length))); i = j + 1; continue;
+      }
+      const hex = /^#[0-9a-fA-F]{3,8}/.exec(line.slice(i));
+      if (hex) { html += span("s", hex[0]); i += hex[0].length; continue; }
+      const num = /^-?\d[\d.]*[a-z%]*/.exec(line.slice(i));
+      if (num && (/\d/.test(ch) || (ch === "-" && /\d/.test(line[i + 1] || "")))) {
+        html += span("n", num[0]); i += num[0].length; continue;
+      }
+      const ident = /^!?[-A-Za-z][\w-]*/.exec(line.slice(i));
+      if (ident) {
+        const w = ident[0];
+        const cls = w === "!important" ? "k"
+          : w.startsWith("--") ? "v"
+          : /^\s*\(/.test(line.slice(i + w.length)) ? "f" : "s";
+        html += span(cls, w); i += w.length; continue;
+      }
+      html += esc(ch); i++;
+    }
+    out.push(html);
+  }
+  return out;
+}
+
+// --- markdown (headings blue+bold; fenced code re-highlighted by language) ---
+function highlightMarkdown(text) {
+  const out = []; let fence = null;
+  for (const line of text.split("\n")) {
+    const mark = /^(\s*)(`{3,}|~{3,})\s*([\w-]*)/.exec(line);
+    if (fence) {
+      if (mark && mark[2][0] === fence.mark[0] && !mark[3]) { out.push(span("c", line)); fence = null; }
+      else out.push(fence.hl ? fence.hl(line)[0] : esc(line));
+      continue;
+    }
+    if (mark && mark[2]) {
+      fence = { mark: mark[2], hl: FENCE_LANGS[mark[3].toLowerCase()] || null };
+      out.push(span("c", line)); continue;
+    }
+    if (/^#{1,6}\s/.test(line)) { out.push(`<span class="k b">${esc(line)}</span>`); continue; }
+    if (/^\s*>/.test(line)) { out.push(span("c", line)); continue; }
+    let html = esc(line)
+      .replace(/`([^`]+)`/g, '<span class="s">`$1`</span>')
+      .replace(/\*\*([^*]+)\*\*/g, '<span class="b">**$1**</span>')
+      .replace(/^(\s*)([-*+]|\d+\.)(\s)/, '$1<span class="kc">$2</span>$3')
+      .replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, '[$1](<span class="s">$2</span>)');
+    out.push(html);
+  }
+  return out;
+}
+
+// --- yaml (keys light blue; scalars orange, as Dark+ renders them) ---
+function yamlValue(rest) {
+  let html = "", i = 0;
+  while (i < rest.length) {
+    const ch = rest[i];
+    if (ch === "#") { html += span("c", rest.slice(i)); break; }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < rest.length && rest[j] !== ch) { if (rest[j] === "\\") j++; j++; }
+      html += span("s", rest.slice(i, Math.min(j + 1, rest.length))); i = j + 1; continue;
+    }
+    if ("{}[],:".includes(ch) || ch === " ") { html += esc(ch); i++; continue; }
+    const tok = /^[^\s{}\[\],:#]+/.exec(rest.slice(i))[0];
+    if (/^-?\d[\d.]*$/.test(tok)) html += span("n", tok);
+    else if (["true", "false", "null", "yes", "no", "on", "off", "~"].includes(tok.toLowerCase())) html += span("k", tok);
+    else if (/^[\w-]+$/.test(tok) && rest[i + tok.length] === ":") html += span("v", tok);
+    else html += span("s", tok);
+    i += tok.length;
+  }
+  return html;
+}
+
+function highlightYAML(text) {
+  return text.split("\n").map(line => {
+    if (/^\s*#/.test(line)) return span("c", line);
+    if (/^---|^\.\.\./.test(line)) return span("c", line);
+    const kv = /^(\s*(?:-\s+)?)([^\s:#'"][^:#]*?)(:)(\s|$)/.exec(line);
+    if (kv) return esc(kv[1]) + span("v", kv[2]) + ":" + kv[4] + yamlValue(line.slice(kv[0].length));
+    const item = /^(\s*-\s*)(.*)$/.exec(line);
+    if (item) return esc(item[1]) + yamlValue(item[2]);
+    return yamlValue(line);
+  });
+}
+
+// --- toml / ini / .editorconfig ---
+function iniValue(rest) {
+  let html = "", i = 0;
+  while (i < rest.length) {
+    const ch = rest[i];
+    if (ch === "#" || ch === ";") { html += span("c", rest.slice(i)); break; }
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < rest.length && rest[j] !== ch) { if (rest[j] === "\\") j++; j++; }
+      html += span("s", rest.slice(i, Math.min(j + 1, rest.length))); i = j + 1; continue;
+    }
+    const word = /^[\w.+-]+/.exec(rest.slice(i));
+    if (word) {
+      const w = word[0];
+      if (/^-?[\d._]+$/.test(w) || /^\d{4}-\d\d-\d\d/.test(w)) html += span("n", w);
+      else if (["true", "false"].includes(w)) html += span("k", w);
+      else html += esc(w);
+      i += w.length; continue;
+    }
+    html += esc(ch); i++;
+  }
+  return html;
+}
+
+function highlightIni(text) {
+  return text.split("\n").map(line => {
+    if (/^\s*[#;]/.test(line)) return span("c", line);
+    const sect = /^(\s*)(\[[^\]]*\])(\s*)$/.exec(line);
+    if (sect) return sect[1] + span("d", sect[2]) + sect[3];
+    const kv = /^(\s*)([\w.*{}-]+)(\s*[:=]\s*)(.*)$/.exec(line);
+    if (kv) return kv[1] + span("v", kv[2]) + esc(kv[3]) + iniValue(kv[4]);
+    return iniValue(line);
+  });
+}
+
+// --- dockerfile ---
+const DOCKER_INSTR = new Set(("from run cmd copy add workdir expose env arg entrypoint label user volume " +
+  "shell healthcheck onbuild stopsignal maintainer").split(" "));
+
+function highlightDocker(text) {
+  return text.split("\n").map(line => {
+    if (/^\s*#/.test(line)) return span("c", line);
+    const m = /^(\s*)([A-Za-z]+)(.*)$/.exec(line);
+    if (!m || !DOCKER_INSTR.has(m[2].toLowerCase())) return esc(line);
+    let html = m[1] + span("k", m[2]);
+    const rest = m[3];
+    let i = 0;
+    while (i < rest.length) {
+      const ch = rest[i];
+      if (ch === '"' || ch === "'") {
+        let j = i + 1;
+        while (j < rest.length && rest[j] !== ch) { if (rest[j] === "\\") j++; j++; }
+        html += span("s", rest.slice(i, Math.min(j + 1, rest.length))); i = j + 1; continue;
+      }
+      if (ch === "$") {
+        const v = /^\$\{?[\w]+\}?/.exec(rest.slice(i));
+        if (v) { html += span("v", v[0]); i += v[0].length; continue; }
+      }
+      const word = /^[A-Za-z]+/.exec(rest.slice(i));
+      if (word && ["AS", "as"].includes(word[0])) { html += span("k", word[0]); i += word[0].length; continue; }
+      html += esc(ch); i++;
+    }
+    return html;
+  });
+}
+
+// --- shell ---
+const SH_KW = new Set(("if then else elif fi for while until do done case esac in function select " +
+  "return exit break continue local export readonly set unset shift trap source").split(" "));
+
+function highlightShell(text) {
+  return text.split("\n").map(line => {
+    let html = "", i = 0;
+    while (i < line.length) {
+      const ch = line[i];
+      if (ch === "#") { html += span("c", line.slice(i)); break; }
+      if (ch === '"' || ch === "'") {
+        let j = i + 1;
+        while (j < line.length && line[j] !== ch) { if (line[j] === "\\" && ch === '"') j++; j++; }
+        html += span("s", line.slice(i, Math.min(j + 1, line.length))); i = j + 1; continue;
+      }
+      if (ch === "$") {
+        const v = /^\$\{?[\w@#?*!$-]+\}?|^\$\(/.exec(line.slice(i));
+        if (v) { html += span("v", v[0]); i += v[0].length; continue; }
+      }
+      const word = /^[A-Za-z_][\w-]*/.exec(line.slice(i));
+      if (word) {
+        html += span(SH_KW.has(word[0]) ? "kc" : "", word[0]);
+        i += word[0].length; continue;
+      }
+      const num = /^\d[\d.]*/.exec(line.slice(i));
+      if (num) { html += span("n", num[0]); i += num[0].length; continue; }
+      html += esc(ch); i++;
+    }
+    return html;
+  });
+}
+
+// --- .gitignore / .dockerignore ---
+function highlightIgnore(text) {
+  return text.split("\n").map(line =>
+    /^\s*#/.test(line) ? span("c", line)
+      : line.startsWith("!") ? span("kc", "!") + esc(line.slice(1))
+      : esc(line));
+}
+
+// --- go.mod / go.sum ---
+function highlightGoMod(text) {
+  return text.split("\n").map(line => {
+    if (/^\s*\/\//.test(line)) return span("c", line);
+    const m = /^(\s*)(module|go|require|replace|exclude|retract|toolchain)(\b.*)$/.exec(line);
+    if (!m) return esc(line);
+    const rest = esc(m[3]).replace(/v?\d[\w.+-]*/g, x => `<span class="n">${x}</span>`);
+    return m[1] + span("k", m[2]) + rest;
+  });
+}
+
+// --- dispatch: by file path in the editor, by tag in chat fences ---
+const EXT_HIGHLIGHTERS = {
+  py: highlightPython, pyw: highlightPython,
+  js: HL_JS, mjs: HL_JS, cjs: HL_JS, jsx: HL_JS,
+  ts: HL_TS, tsx: HL_TS,
+  go: HL_GO, rs: HL_RUST,
+  c: HL_C, h: HL_C, cpp: HL_C, cc: HL_C, hpp: HL_C, java: HL_C,
+  json: highlightJSON,
+  html: highlightHTML, htm: highlightHTML, xml: highlightHTML,
+  css: highlightCSS,
+  md: highlightMarkdown, markdown: highlightMarkdown,
+  yml: highlightYAML, yaml: highlightYAML,
+  toml: highlightIni, ini: highlightIni, cfg: highlightIni, conf: highlightIni, editorconfig: highlightIni,
+  sh: highlightShell, bash: highlightShell,
+  gitignore: highlightIgnore, dockerignore: highlightIgnore,
+};
+
+const FENCE_LANGS = {
+  python: highlightPython, py: highlightPython,
+  javascript: HL_JS, js: HL_JS, jsx: HL_JS,
+  typescript: HL_TS, ts: HL_TS, tsx: HL_TS,
+  go: HL_GO, golang: HL_GO, rust: HL_RUST, rs: HL_RUST,
+  json: highlightJSON, html: highlightHTML, xml: highlightHTML, css: highlightCSS,
+  yaml: highlightYAML, yml: highlightYAML, toml: highlightIni, ini: highlightIni,
+  dockerfile: highlightDocker, docker: highlightDocker,
+  bash: highlightShell, sh: highlightShell, shell: highlightShell, console: highlightShell,
+  markdown: highlightMarkdown, md: highlightMarkdown,
+};
+
+function highlighterFor(path) {
+  const name = (path || "").split("/").pop().toLowerCase();
+  if (name === "dockerfile" || name === "containerfile") return highlightDocker;
+  if (name === "go.mod" || name === "go.sum") return highlightGoMod;
+  const ext = name.includes(".") ? name.split(".").pop() : "";
+  return EXT_HIGHLIGHTERS[ext] || plainLines;
+}
+
+function highlightByLang(tag) {
+  return FENCE_LANGS[(tag || "").toLowerCase()] || plainLines;
+}
+
 // ---------- editor groups ----------
 const LANG_NAMES = { py: "Python", md: "Markdown", json: "JSON", js: "JavaScript",
-  ts: "TypeScript", html: "HTML", css: "CSS", yml: "YAML", yaml: "YAML", toml: "TOML", txt: "Plain Text" };
+  jsx: "JavaScript JSX", ts: "TypeScript", tsx: "TypeScript JSX", go: "Go", rs: "Rust",
+  html: "HTML", css: "CSS", yml: "YAML", yaml: "YAML", toml: "TOML", txt: "Plain Text",
+  sh: "Shell Script", xml: "XML", sql: "SQL", ini: "Ini", cfg: "Properties",
+  gitignore: "Ignore", dockerignore: "Ignore", editorconfig: "EditorConfig",
+  mod: "Go Module File", sum: "Go Checksum File" };
+const FILE_LANG_NAMES = { dockerfile: "Dockerfile", containerfile: "Dockerfile" };
 
 function rowNumbers() {
   return [...new Set(groups.map(g => g.row))].sort((a, b) => a - b);
@@ -881,12 +1393,11 @@ function floatTab(path, gi) {
       <textarea id="fta" spellcheck="false" style="position:absolute;inset:0;margin:0;padding:6px 10px;font:inherit;white-space:pre;overflow:auto;border:0;outline:0;resize:none;background:transparent;color:transparent;caret-color:#aeafad;z-index:2;tab-size:4"></textarea>
     </div>`;
   const style = doc.createElement("style");
-  style.textContent = ".k{color:#569cd6}.s{color:#ce9178}.c{color:#6a9955}.n{color:#b5cea8}.f{color:#dcdcaa}.d{color:#d7ba7d}.t{color:#4ec9b0} ::selection{background:#264f78;color:transparent}";
+  style.textContent = ".k{color:#569cd6}.s{color:#ce9178}.c{color:#6a9955}.n{color:#b5cea8}.f{color:#dcdcaa}.d{color:#d7ba7d}.t{color:#4ec9b0}.kc{color:#c586c0}.v{color:#9cdcfe}.re{color:#d16969}.b{font-weight:600} ::selection{background:#264f78;color:transparent}";
   doc.head.appendChild(style);
   const ta = doc.getElementById("fta"), hl = doc.getElementById("fhl");
   const paint = () => {
-    hl.innerHTML = (path.endsWith(".py")
-      ? highlightPython(ta.value) : ta.value.split("\n").map(esc)).join("\n") + "\n";
+    hl.innerHTML = highlighterFor(path)(ta.value).join("\n") + "\n";
   };
   ta.value = files.get(path).content;
   paint();
@@ -1038,8 +1549,9 @@ function updateStatusForActive() {
     $("st-lang").textContent = "Plain Text";
     return;
   }
+  const base = (g.active.split("/").pop() || "").toLowerCase();
   const ext = (g.active.split(".").pop() || "").toLowerCase();
-  $("st-lang").textContent = LANG_NAMES[ext] || "Plain Text";
+  $("st-lang").textContent = FILE_LANG_NAMES[base] || LANG_NAMES[ext] || "Plain Text";
   updateCaretUI(activeGroup);
 }
 
@@ -1048,7 +1560,7 @@ function syncHl(gi) {
   if (!ta) return;
   const path = groups[gi].active || "";
   const content = ta.value;
-  const lines = path.endsWith(".py") ? highlightPython(content) : content.split("\n").map(esc);
+  const lines = highlighterFor(path)(content);
   $(`hl${gi}`).innerHTML = lines.join("\n") + "\n";
   $(`gutter${gi}`).innerHTML = lines.map((_, i) => `<span data-ln="${i + 1}">${i + 1}</span>`).join("\n") + "\n";
   renderMinimap(gi, content);
@@ -1085,8 +1597,8 @@ function renderMinimap(gi, content) {
     const trimmed = line.trimStart();
     if (!trimmed) return;
     const indent = (line.length - trimmed.length) * 0.9;
-    ctx.fillStyle = trimmed.startsWith("#") ? "#6a995566"
-      : trimmed.startsWith("def ") || trimmed.startsWith("class ") ? "#dcdcaa66" : "#cccccc4d";
+    ctx.fillStyle = trimmed.startsWith("#") || trimmed.startsWith("//") ? "#6a995566"
+      : /^(def |class |func |fn |function |impl |export )/.test(trimmed) ? "#dcdcaa66" : "#cccccc4d";
     ctx.fillRect(2 + indent, y, Math.min(84, trimmed.length * 0.85), Math.max(1, step - 1));
   });
   updateMinimapView(gi);
@@ -2157,7 +2669,7 @@ function renderMarkdown(src) {
     const before = mdInline(src.slice(last, m.index));
     if (before) html.push(before, "\n");
     const lang = m[1].toLowerCase(), code = m[2].replace(/\n$/, "");
-    const body = (lang === "py" || lang === "python") ? highlightPython(code).join("\n") : esc(code);
+    const body = highlightByLang(lang)(code).join("\n");
     html.push(`<pre class="chat-code">${body}</pre>`);
     last = m.index + m[0].length;
   }

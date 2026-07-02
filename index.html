@@ -6,7 +6,7 @@
 <title>detcode</title>
 <style>
   :root {
-    --sbw: 300px; --ph: 240px;
+    --sbw: 300px; --ph: 240px; --auxw: 360px;
     --tb-bg: #3c3c3c; --tb-fg: #cccccc;
     --ab-bg: #333333; --ab-fg: #858585; --ab-active: #ffffff;
     --sb-bg: #252526; --sb-fg: #cccccc; --sb-head: #bbbbbb; --sb-sect: #cccccc;
@@ -27,22 +27,26 @@
   html, body { height: 100%; overflow: hidden; }
   body {
     display: grid; font-family: var(--ui); font-size: 13px; color: var(--ed-fg);
-    grid-template-columns: 48px var(--sbw) 4px 1fr;
+    grid-template-columns: 48px var(--sbw) 4px 1fr 4px var(--auxw);
     grid-template-rows: 30px 1fr 4px var(--ph) 22px;
     grid-template-areas:
-      "menu menu menu menu"
-      "ab sidebar vsash main"
-      "ab sidebar vsash hsash"
-      "ab sidebar vsash panel"
-      "status status status status";
+      "menu menu menu menu menu menu"
+      "ab sidebar vsash main auxsash aux"
+      "ab sidebar vsash hsash auxsash aux"
+      "ab sidebar vsash panel auxsash aux"
+      "status status status status status status";
     background: var(--ed-bg);
   }
   body.panel-hidden { grid-template-rows: 30px 1fr 0 0 22px; }
   body.panel-hidden #panel, body.panel-hidden #hsash { display: none; }
+  body.aux-hidden { grid-template-columns: 48px var(--sbw) 4px 1fr 0 0; }
+  body.aux-hidden #auxbar, body.aux-hidden #auxsash { display: none; }
   body.resizing { user-select: none; cursor: inherit; }
   #vsash { grid-area: vsash; cursor: col-resize; background: transparent; transition: background .15s .2s; z-index: 30; }
   #hsash { grid-area: hsash; cursor: row-resize; background: transparent; transition: background .15s .2s; z-index: 30; }
-  #vsash:hover, #vsash.dragging, #hsash:hover, #hsash.dragging { background: var(--sash); }
+  #auxsash { grid-area: auxsash; cursor: col-resize; background: transparent; transition: background .15s .2s; z-index: 30; }
+  #vsash:hover, #vsash.dragging, #hsash:hover, #hsash.dragging,
+  #auxsash:hover, #auxsash.dragging { background: var(--sash); }
   ::-webkit-scrollbar { width: 14px; height: 14px; }
   ::-webkit-scrollbar-thumb { background: #79797966; }
   ::-webkit-scrollbar-thumb:hover { background: #797979b3; }
@@ -60,7 +64,16 @@
     position: absolute; left: 0; right: 0; text-align: center; pointer-events: none;
     color: #999999; font-size: 12px; white-space: nowrap; overflow: hidden;
   }
-  #wincontrols { margin-left: auto; display: flex; height: 30px; flex: none; z-index: 1; }
+  #layoutcontrols { margin-left: auto; display: flex; align-items: center; gap: 2px; padding-right: 6px; z-index: 1; }
+  #layoutcontrols div {
+    width: 28px; height: 22px; display: grid; place-items: center; color: #cccccc;
+    border-radius: 5px; cursor: pointer; opacity: .85;
+  }
+  #layoutcontrols div:hover { background: #ffffff1f; opacity: 1; }
+  #layoutcontrols svg { width: 16px; height: 16px; }
+  #layout-chat .fillpart { opacity: 0; }
+  #layout-chat.on .fillpart { opacity: .55; }
+  #wincontrols { display: flex; height: 30px; flex: none; z-index: 1; }
   #wincontrols div {
     width: 46px; display: grid; place-items: center; font-size: 11px; color: #cccccc;
     font-family: "Segoe MDL2 Assets", var(--ui);
@@ -245,6 +258,81 @@
   #term-row .tp { color: var(--green); }
   #term-in { flex: 1; background: none; border: none; outline: none; color: var(--term-fg); font: inherit; }
 
+  /* ---------- secondary side bar (chat) ---------- */
+  #auxbar { grid-area: aux; background: var(--sb-bg); color: var(--sb-fg); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+  #chat-head {
+    flex: none; display: flex; align-items: center; height: 35px; padding: 0 8px 0 20px;
+    font-size: 11px; letter-spacing: .4px; text-transform: uppercase; color: var(--sb-head); user-select: none;
+  }
+  #chat-head .chat-actions { margin-left: auto; display: flex; gap: 2px; }
+  .cact { width: 22px; height: 22px; display: grid; place-items: center; color: #cccccc; border-radius: 5px; cursor: pointer; opacity: .85; }
+  .cact:hover { background: #ffffff1f; opacity: 1; }
+  .cact svg { width: 16px; height: 16px; }
+  #chat-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 4px 0 8px; font-size: 13px; }
+  #chat-welcome { text-align: center; padding: 48px 28px 0; color: #8a8a8a; }
+  #chat-welcome .wicon { width: 40px; height: 40px; margin: 0 auto 14px; color: #7a7a7a; }
+  #chat-welcome .wicon svg { width: 40px; height: 40px; }
+  #chat-welcome h3 { color: #e7e7e7; font-size: 14px; font-weight: 600; margin-bottom: 8px; }
+  #chat-welcome p { font-size: 12px; line-height: 1.5; margin-bottom: 18px; }
+  #chat-welcome .whint { font-size: 12px; padding: 2px 0; }
+  .cturn { padding: 8px 20px; }
+  .chead { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; color: #e7e7e7; margin-bottom: 6px; }
+  .cavatar { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; flex: none; color: #fff; }
+  .cavatar svg { width: 12px; height: 12px; }
+  .cavatar.you { background: var(--accent); }
+  .cavatar.gem { background: linear-gradient(135deg, #4285f4, #9b72cb); }
+  .chead .cmodel { font-weight: 400; font-size: 11px; color: #8a8a8a; }
+  .cmsg { color: #cccccc; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+  .cturn.user .cmsg { background: #ffffff08; border: 1px solid #ffffff0d; border-radius: 4px; padding: 6px 10px; }
+  .cmsg b { color: #e7e7e7; }
+  .chat-code {
+    background: var(--ed-bg); border: 1px solid var(--border); border-radius: 4px;
+    padding: 8px 12px; margin: 6px 0; font-family: var(--mono); font-size: 12px;
+    line-height: 17px; overflow-x: auto; white-space: pre;
+  }
+  .chat-icode { font-family: var(--mono); font-size: 12px; background: #8080802b; border-radius: 3px; padding: 0 4px; }
+  .cctx { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; font-size: 11px; color: #9d9d9d; border: 1px solid #454545; border-radius: 3px; padding: 1px 6px; }
+  .cctx .fico { width: 12px; height: 12px; }
+  .cmsg.cerror { color: var(--red); border: 1px solid #f4877133; background: #f487710d; border-radius: 4px; padding: 6px 10px; }
+  .cthinking { display: inline-flex; gap: 4px; padding: 4px 0; }
+  .cthinking i { width: 5px; height: 5px; border-radius: 50%; background: #8a8a8a; animation: chatdot 1s infinite; }
+  .cthinking i:nth-child(2) { animation-delay: .18s; }
+  .cthinking i:nth-child(3) { animation-delay: .36s; }
+  @keyframes chatdot { 0%, 60%, 100% { opacity: .25; } 30% { opacity: 1; } }
+  #chat-inputbox { flex: none; position: relative; margin: 4px 12px 12px; background: #313131; border: 1px solid #454545; border-radius: 4px; }
+  #chat-inputbox:focus-within { border-color: #007fd4; }
+  #chat-ctxrow { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px 0; }
+  .ctx-chip {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #a0a0a0;
+    border: 1px solid #454545; border-radius: 3px; padding: 1px 6px; cursor: pointer; user-select: none;
+  }
+  .ctx-chip:hover { background: #ffffff12; color: #e7e7e7; }
+  .ctx-chip svg { width: 12px; height: 12px; }
+  .ctx-chip .fico { width: 12px; height: 12px; }
+  #chat-input {
+    display: block; width: 100%; background: transparent; border: none; outline: none; resize: none;
+    color: #cccccc; font-family: var(--ui); font-size: 13px; line-height: 1.45; padding: 8px; max-height: 130px;
+  }
+  #chat-input::placeholder { color: #7a7a7a; }
+  #chat-toolbar { display: flex; align-items: center; padding: 0 6px 6px 8px; }
+  #chat-model {
+    display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #a0a0a0;
+    padding: 2px 6px; border-radius: 3px; cursor: pointer; user-select: none;
+  }
+  #chat-model:hover { background: #ffffff12; color: #e7e7e7; }
+  #chat-model svg { width: 12px; height: 12px; }
+  #chat-send { margin-left: auto; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 4px; color: #cccccc; cursor: pointer; }
+  #chat-send:hover { background: #ffffff1f; }
+  #chat-send.disabled { opacity: .35; pointer-events: none; }
+  #chat-send svg { width: 15px; height: 15px; }
+  #chat-modelmenu {
+    position: absolute; bottom: 34px; left: 6px; z-index: 70; background: #1f1f1f;
+    border: 1px solid #454545; border-radius: 6px; box-shadow: 0 4px 12px #000a; padding: 4px; min-width: 180px;
+  }
+  #chat-modelmenu .mitem { display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; border-radius: 4px; cursor: pointer; color: #cccccc; }
+  #chat-modelmenu .mitem:hover { background: var(--list-active); color: #fff; }
+  #chat-modelmenu .check { width: 14px; text-align: center; }
+
   /* ---------- status bar ---------- */
   #status { grid-area: status; background: var(--status-bg); color: var(--status-fg); display: flex; align-items: stretch; font-size: 12px; }
   #status .sitem { display: flex; align-items: center; gap: 4px; padding: 0 8px; cursor: default; white-space: nowrap; }
@@ -268,7 +356,7 @@
   #qo-list .qo .fico { width: 16px; height: 16px; flex: none; }
 </style>
 </head>
-<body>
+<body class="aux-hidden">
   <header id="menubar" aria-label="Menu bar">
     <div class="logo">⟡</div>
     <div class="menu" data-menu="file">File</div>
@@ -280,6 +368,14 @@
     <div class="menu" data-menu="terminal">Terminal</div>
     <div class="menu" data-menu="help">Help</div>
     <div id="titletext">detcode</div>
+    <div id="layoutcontrols">
+      <div id="layout-chat" title="Toggle Secondary Side Bar (Ctrl+Alt+B)">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1">
+          <rect x="1.5" y="2.5" width="13" height="11" rx="1"/><path d="M10.5 2.5v11"/>
+          <path class="fillpart" d="M11 3h3v10h-3z" fill="currentColor" stroke="none"/>
+        </svg>
+      </div>
+    </div>
     <div id="wincontrols">
       <div title="Minimize">&#xE921;</div><div title="Maximize">&#xE922;</div>
       <div class="close" title="Close">&#xE8BB;</div>
@@ -390,6 +486,42 @@
     </div>
   </section>
 
+  <div id="auxsash" title="Resize chat"></div>
+  <aside id="auxbar" aria-label="Chat">
+    <div id="chat-head">
+      <span>Chat</span>
+      <span class="chat-actions">
+        <span class="cact" id="chat-new" title="New Chat (Ctrl+L)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M8 3v10M3 8h10"/></svg>
+        </span>
+        <span class="cact" id="chat-history" title="Show Chats...">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3.2l2.2 1.4"/></svg>
+        </span>
+        <span class="cact" id="chat-more" title="More Actions...">
+          <svg viewBox="0 0 16 16" fill="currentColor"><circle cx="3.4" cy="8" r="1.2"/><circle cx="8" cy="8" r="1.2"/><circle cx="12.6" cy="8" r="1.2"/></svg>
+        </span>
+        <span class="cact" id="chat-close" title="Hide Secondary Side Bar (Ctrl+Alt+B)">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </span>
+      </span>
+    </div>
+    <div id="chat-body"></div>
+    <div id="chat-inputbox">
+      <div id="chat-ctxrow"></div>
+      <textarea id="chat-input" rows="1" placeholder="Ask Gemini" spellcheck="false"></textarea>
+      <div id="chat-toolbar">
+        <span id="chat-model" title="Pick Model">
+          <span id="chat-model-label">Gemini 2.5 Flash</span>
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4z"/></svg>
+        </span>
+        <span id="chat-send" class="disabled" title="Send (Enter)">
+          <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 1.8l13 6.2-13 6.2 2.8-6.2z"/></svg>
+        </span>
+      </div>
+      <div id="chat-modelmenu" hidden></div>
+    </div>
+  </aside>
+
   <footer id="status">
     <span class="sitem" id="st-branch">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="6" r="2.4"/><circle cx="7" cy="18" r="2.4"/><circle cx="17" cy="8" r="2.4"/><path d="M7 8.4v7.2"/><path d="M17 10.4c0 4-10 3-10 7"/></svg>
@@ -402,6 +534,7 @@
       <span class="sitem">UTF-8</span>
       <span class="sitem">LF</span>
       <span class="sitem" id="st-lang">Plain Text</span>
+      <span class="sitem" id="st-chat" title="Toggle Chat (Ctrl+Alt+I)">✦ Gemini</span>
       <span class="sitem" id="st-version">⟡ detcode</span>
     </span>
   </footer>
@@ -1320,6 +1453,8 @@ async function menuItems(which) {
     { label: "Extensions: Packs", action: () => showView("ext") },
     { label: "detcode Engine", action: () => showView("detcode") },
     "-",
+    { label: "Chat", hint: "Ctrl+Alt+I", action: () => toggleChat() },
+    "-",
     { label: "Split Editor Right", hint: "Ctrl+\\", disabled: !active, action: splitEditor },
     { label: "Split Editor Down", hint: "Ctrl+K Ctrl+\\", disabled: !active, action: splitDown },
     { label: "Move Active Tab into Floating Window", disabled: !active,
@@ -1414,24 +1549,33 @@ document.addEventListener("click", e => {
 });
 
 // ---------- sashes (drag resize) ----------
+function persistLayout() {
+  const style = getComputedStyle(document.documentElement);
+  localStorage.setItem("detcode-layout", JSON.stringify({
+    sbw: parseInt(style.getPropertyValue("--sbw")), ph: parseInt(style.getPropertyValue("--ph")),
+    auxw: parseInt(style.getPropertyValue("--auxw")),
+    chat: document.body.classList.contains("aux-hidden") ? 0 : 1,
+  }));
+}
+
 function initSashes() {
   const saved = JSON.parse(localStorage.getItem("detcode-layout") || "{}");
   if (saved.sbw) document.documentElement.style.setProperty("--sbw", saved.sbw + "px");
   if (saved.ph) document.documentElement.style.setProperty("--ph", saved.ph + "px");
+  if (saved.auxw) document.documentElement.style.setProperty("--auxw", saved.auxw + "px");
+  if (saved.chat) document.body.classList.remove("aux-hidden");
   let mode = null;
-  const persist = () => {
-    const style = getComputedStyle(document.documentElement);
-    localStorage.setItem("detcode-layout", JSON.stringify({
-      sbw: parseInt(style.getPropertyValue("--sbw")), ph: parseInt(style.getPropertyValue("--ph")),
-    }));
-  };
   $("vsash").addEventListener("mousedown", () => { mode = "v"; $("vsash").classList.add("dragging"); document.body.classList.add("resizing"); });
   $("hsash").addEventListener("mousedown", () => { mode = "h"; $("hsash").classList.add("dragging"); document.body.classList.add("resizing"); });
+  $("auxsash").addEventListener("mousedown", () => { mode = "a"; $("auxsash").classList.add("dragging"); document.body.classList.add("resizing"); });
   document.addEventListener("mousemove", e => {
     if (!mode) return;
     if (mode === "v") {
       const width = Math.max(140, Math.min(window.innerWidth * 0.5, e.clientX - 48));
       document.documentElement.style.setProperty("--sbw", width + "px");
+    } else if (mode === "a") {
+      const width = Math.max(260, Math.min(window.innerWidth * 0.5, window.innerWidth - e.clientX));
+      document.documentElement.style.setProperty("--auxw", width + "px");
     } else {
       const height = Math.max(80, Math.min(window.innerHeight * 0.75, window.innerHeight - e.clientY - 24));
       document.documentElement.style.setProperty("--ph", height + "px");
@@ -1441,8 +1585,9 @@ function initSashes() {
     if (!mode) return;
     mode = null;
     $("vsash").classList.remove("dragging"); $("hsash").classList.remove("dragging");
+    $("auxsash").classList.remove("dragging");
     document.body.classList.remove("resizing");
-    persist();
+    persistLayout();
     refreshMinimaps();
   });
   window.addEventListener("resize", refreshMinimaps);
@@ -1817,6 +1962,7 @@ const HELP = [
   ["mint <kw1,kw2>", "mint the workspace as a pack (its tests must pass)"],
   ["test", "run the workspace tests server-side"],
   ["split / split down", "split right (Ctrl+\\) or down (Ctrl+K Ctrl+\\) — compose into grids"],
+  ["chat", "toggle the Gemini chat side bar (Ctrl+Alt+I)"],
   ["float", "move the active tab into a floating window (or drag it out)"],
   ["save / save project", "write buffers back to disk (also Ctrl+S)"],
   ["<anything else>", "English, acting on the active file (ask/fix/explain/...)"],
@@ -1838,6 +1984,7 @@ async function runCommand(raw) {
   if (cmd === "clear") { $("term-out").innerHTML = ""; return; }
   if (cmd === "split" || cmd === "split right") { splitEditor(); return; }
   if (cmd === "split down") { splitDown(); return; }
+  if (cmd === "chat") { toggleChat(); return; }
   if (cmd === "float") {
     if (active) floatTab(active, activeGroup);
     else termPrint('<span class="err">no active file to float</span>');
@@ -1962,6 +2109,181 @@ $("term-in").addEventListener("keydown", e => {
   }
 });
 
+// ---------- chat (secondary side bar) ----------
+const CHAT_MODELS = [
+  ["gemini-2.5-pro", "Gemini 2.5 Pro"],
+  ["gemini-2.5-flash", "Gemini 2.5 Flash"],
+  ["gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite"],
+];
+const CHAT_SYSTEM = "You are Gemini, an AI coding assistant embedded in the detcode workbench "
+  + "(a VS Code-style editor). Answer concisely in markdown; use fenced code blocks for code.";
+const SPARK_ICON = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1l1.8 5.2L15 8l-5.2 1.8L8 15l-1.8-5.2L1 8l5.2-1.8z"/></svg>';
+const PERSON_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="8" cy="5.2" r="2.6"/><path d="M2.8 13.6c1-2.7 3.3-3.7 5.2-3.7s4.2 1 5.2 3.7"/></svg>';
+const CLIP_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M10.6 4.4L5.7 9.3a1.7 1.7 0 002.4 2.4l5-5a3.1 3.1 0 00-4.4-4.4l-5 5a4.5 4.5 0 006.4 6.4l4.4-4.4"/></svg>';
+
+let chatTurns = [];        // { role, content, ctx?, pending?, error? }
+let chatBusy = false;
+let chatCtxPath = null;    // file attached to the next request
+let chatModel = localStorage.getItem("detcode-chat-model") || "gemini-2.5-flash";
+if (!CHAT_MODELS.some(([id]) => id === chatModel)) chatModel = "gemini-2.5-flash";
+
+const chatVisible = () => !document.body.classList.contains("aux-hidden");
+const chatModelLabel = () => CHAT_MODELS.find(([id]) => id === chatModel)[1];
+
+function toggleChat(force) {
+  const show = force !== undefined ? force : !chatVisible();
+  document.body.classList.toggle("aux-hidden", !show);
+  $("layout-chat").classList.toggle("on", show);
+  persistLayout();
+  if (show) { renderChat(); $("chat-input").focus(); }
+}
+
+function mdInline(text) {
+  return esc(text.replace(/^\n+|\n+$/g, ""))
+    .replace(/`([^`\n]+)`/g, '<code class="chat-icode">$1</code>')
+    .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+    .replace(/^#{1,4}\s+(.+)$/gm, "<b>$1</b>");
+}
+
+function renderMarkdown(src) {
+  const html = [];
+  const fence = /```(\w*)[^\S\n]*\n([\s\S]*?)```/g;
+  let last = 0, m;
+  while ((m = fence.exec(src))) {
+    const before = mdInline(src.slice(last, m.index));
+    if (before) html.push(before, "\n");
+    const lang = m[1].toLowerCase(), code = m[2].replace(/\n$/, "");
+    const body = (lang === "py" || lang === "python") ? highlightPython(code).join("\n") : esc(code);
+    html.push(`<pre class="chat-code">${body}</pre>`);
+    last = m.index + m[0].length;
+  }
+  const rest = mdInline(src.slice(last));
+  if (rest) html.push(rest);
+  return html.join("");
+}
+
+function renderChat() {
+  const box = $("chat-body");
+  if (!chatTurns.length) {
+    box.innerHTML = `<div id="chat-welcome">
+      <div class="wicon">${SPARK_ICON}</div>
+      <h3>Ask Gemini</h3>
+      <p>Gemini is powered by AI, so mistakes are possible. Review output carefully before use.</p>
+      <div class="whint">📎 Add Context attaches the active editor file</div>
+      <div class="whint">Enter to send · Shift+Enter for a new line</div>
+    </div>`;
+    return;
+  }
+  box.innerHTML = chatTurns.map(t => {
+    if (t.role === "user") {
+      const ctx = t.ctx ? `<div class="cctx">${fileIcon(t.ctx.split("/").pop())}${esc(t.ctx.split("/").pop())}</div>` : "";
+      return `<div class="cturn user"><div class="chead"><span class="cavatar you">${PERSON_ICON}</span>You</div>
+        <div class="cmsg">${esc(t.content)}${ctx}</div></div>`;
+    }
+    const head = `<div class="chead"><span class="cavatar gem">${SPARK_ICON}</span>Gemini <span class="cmodel">${esc(chatModelLabel())}</span></div>`;
+    if (t.pending) return `<div class="cturn">${head}<div class="cthinking"><i></i><i></i><i></i></div></div>`;
+    if (t.error) return `<div class="cturn">${head}<div class="cmsg cerror">${esc(t.error)}</div></div>`;
+    return `<div class="cturn">${head}<div class="cmsg">${renderMarkdown(t.content)}</div></div>`;
+  }).join("");
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderCtxRow() {
+  const row = $("chat-ctxrow");
+  if (chatCtxPath && files.has(chatCtxPath)) {
+    row.innerHTML = `<span class="ctx-chip" title="Remove context">
+      ${fileIcon(chatCtxPath.split("/").pop())}${esc(chatCtxPath.split("/").pop())} ✕</span>`;
+  } else {
+    chatCtxPath = null;
+    row.innerHTML = `<span class="ctx-chip" title="Attach the active editor file as context">${CLIP_ICON} Add Context...</span>`;
+  }
+}
+
+function updateSendBtn() {
+  $("chat-send").classList.toggle("disabled", chatBusy || !$("chat-input").value.trim());
+}
+
+async function sendChat() {
+  const input = $("chat-input");
+  const text = input.value.trim();
+  if (!text || chatBusy) return;
+  chatTurns.push({ role: "user", content: text, ctx: chatCtxPath });
+  const pending = { role: "assistant", content: "", pending: true };
+  chatTurns.push(pending);
+  chatBusy = true;
+  chatCtxPath = null;
+  input.value = "";
+  input.style.height = "auto";
+  renderCtxRow(); updateSendBtn(); renderChat();
+  const messages = [{ role: "system", content: CHAT_SYSTEM }];
+  for (const t of chatTurns) {
+    if (t.pending || t.error) continue;
+    let content = t.content;
+    if (t.role === "user" && t.ctx && files.has(t.ctx)) {
+      content = `Context file ${t.ctx}:\n\`\`\`\n${files.get(t.ctx).content}\n\`\`\`\n\n${t.content}`;
+    }
+    messages.push({ role: t.role, content });
+  }
+  try {
+    const res = await fetch("/api/chat", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, model: chatModel }),
+    });
+    const data = await res.json();
+    if (data.ok) { pending.content = data.output; pending.pending = false; }
+    else { pending.pending = false; pending.error = data.error || "unknown error"; }
+  } catch (err) {
+    pending.pending = false;
+    pending.error = "request failed: " + err;
+  }
+  chatBusy = false;
+  updateSendBtn(); renderChat();
+  input.focus();
+}
+
+$("chat-send").addEventListener("click", sendChat);
+$("chat-input").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); }
+});
+$("chat-input").addEventListener("input", () => {
+  const ta = $("chat-input");
+  ta.style.height = "auto";
+  ta.style.height = Math.min(130, ta.scrollHeight) + "px";
+  updateSendBtn();
+});
+$("chat-new").addEventListener("click", () => {
+  chatTurns = []; chatCtxPath = null;
+  renderCtxRow(); renderChat(); $("chat-input").focus();
+});
+$("chat-close").addEventListener("click", () => toggleChat(false));
+$("chat-ctxrow").addEventListener("click", () => {
+  if (chatCtxPath) { chatCtxPath = null; renderCtxRow(); return; }
+  if (active && files.has(active)) { chatCtxPath = active; renderCtxRow(); }
+  else {
+    const chip = $("chat-ctxrow").querySelector(".ctx-chip");
+    if (chip) { chip.textContent = "open a file to attach it"; setTimeout(renderCtxRow, 1500); }
+  }
+});
+$("chat-model").addEventListener("click", e => {
+  e.stopPropagation();
+  $("chat-modelmenu").innerHTML = CHAT_MODELS.map(([id, label]) =>
+    `<div class="mitem" data-m="${id}"><span class="check">${id === chatModel ? "✓" : ""}</span>${label}</div>`).join("");
+  $("chat-modelmenu").hidden = !$("chat-modelmenu").hidden;
+});
+$("chat-modelmenu").addEventListener("click", e => {
+  const el = e.target.closest("[data-m]");
+  if (!el) return;
+  chatModel = el.dataset.m;
+  localStorage.setItem("detcode-chat-model", chatModel);
+  $("chat-model-label").textContent = chatModelLabel();
+  $("chat-modelmenu").hidden = true;
+});
+document.addEventListener("click", e => {
+  if (!$("chat-modelmenu").hidden && !e.target.closest("#chat-model")) $("chat-modelmenu").hidden = true;
+});
+$("layout-chat").addEventListener("click", () => toggleChat());
+$("st-chat").addEventListener("click", () => toggleChat());
+
 // ---------- quick open + command palette ----------
 let qoItems = [], qoIndex = 0;
 
@@ -1998,6 +2320,8 @@ function quickCandidates(value) {
       ["View: Split Editor Right", "split"],
       ["View: Split Editor Down", "split down"],
       ["View: Float Active Tab", "float"],
+      ["View: Toggle Chat", "chat"],
+      ["Chat: Open Chat (Gemini)", "chat"],
       ["File: Save", "save"],
       ["Help: Show Terminal Commands", "help"],
     ];
@@ -2060,6 +2384,7 @@ document.addEventListener("click", e => {
 // ---------- global keys ----------
 let chordPending = false, chordTimer = null;
 document.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.altKey && ["i", "b"].includes(e.key.toLowerCase())) { e.preventDefault(); toggleChat(); return; }
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "p") { e.preventDefault(); openQuick(">"); return; }
   if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "p") { e.preventDefault(); openQuick(""); return; }
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); showView("explorer"); return; }
@@ -2095,6 +2420,10 @@ document.addEventListener("keydown", e => {
 // ---------- boot ----------
 initSashes();
 setTitle(); renderGroups(); renderTree(); renderScm(); refreshStudy(); showPanel("terminal");
+renderCtxRow();
+$("chat-model-label").textContent = chatModelLabel();
+$("layout-chat").classList.toggle("on", chatVisible());
+if (chatVisible()) renderChat();
 termPrint('<span class="dim">detcode terminal — type help. Engine responses are deterministic and carry provenance.</span>');
 fetch("/api/run").then(r => r.json()).then(u => {
   $("st-version").textContent = `⟡ detcode ${u.version || ""}`;

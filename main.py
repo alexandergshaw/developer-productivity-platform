@@ -12,6 +12,7 @@ import os
 from detcode.determinism import TOOL_VERSION
 from detcode.service import run_request
 from detcode.store import open_default
+import gemini
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 
@@ -61,9 +62,9 @@ def app(environ, start_response) -> list[bytes]:
             head,
         )
 
-    if path == "/api/run":
+    if path in ("/api/run", "/api/chat"):
         if method != "POST":
-            return json_response("200 OK", USAGE)
+            return json_response("200 OK", gemini.USAGE if path == "/api/chat" else USAGE)
         try:
             length = int(environ.get("CONTENT_LENGTH") or 0)
             raw = environ["wsgi.input"].read(length) if length else b"{}"
@@ -73,6 +74,8 @@ def app(environ, start_response) -> list[bytes]:
                 "400 Bad Request",
                 {"ok": False, "refused": False, "error": "body must be valid JSON"},
             )
+        if path == "/api/chat":
+            return json_response("200 OK", gemini.chat(request))
         return json_response("200 OK", run_request(request, store=_get_store()))
 
     if path in ("/", "/index.html") and method in ("GET", "HEAD"):

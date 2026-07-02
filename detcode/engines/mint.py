@@ -13,7 +13,7 @@ Honesty rules match teach:
 from __future__ import annotations
 
 import ast
-import importlib
+import importlib.util
 import os
 import re
 import sys
@@ -119,6 +119,56 @@ def verify_project(root: str, slug: str) -> unittest.TestResult:
         for mod in [m for m in list(sys.modules) if m == slug or m.startswith(slug + ".")
                     or m.startswith(f"minting_{slug}_")]:
             del sys.modules[mod]
+
+
+def materialize_and_verify(files: dict[str, str], slug: str) -> unittest.TestResult:
+    """Write project files to a temp dir, run their tests, clean up."""
+    import shutil
+    import tempfile
+
+    root = tempfile.mkdtemp(prefix="detcode_mint_")
+    try:
+        for path, content in files.items():
+            target = os.path.join(root, path.replace("/", os.sep))
+            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+            with open(target, "w", encoding="utf-8", newline="") as fh:
+                fh.write(content)
+        return verify_project(root, slug)
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def validate_pack_record(record: dict) -> dict:
+    """Structural validation of a pack record (import path)."""
+    required = ("key", "title", "default_slug", "keywords", "description", "files")
+    if not isinstance(record, dict) or not all(k in record for k in required):
+        raise MintError(f"pack record needs {required}")
+    slug = record["default_slug"]
+    if not isinstance(slug, str) or not slug.isidentifier():
+        raise MintError(f"pack default_slug {slug!r} is not a valid identifier")
+    if not record["keywords"]:
+        raise MintError(f"pack {record['key']!r} has no keywords")
+    files = record["files"]
+    if not isinstance(files, dict) or not any(
+        p.startswith("tests/test_") for p in files
+    ):
+        raise MintError(f"pack {record['key']!r} has no tests — packs must be proof-carrying")
+    for path, content in files.items():
+        if path.endswith(".py"):
+            try:
+                ast.parse(content.replace("__PKG__", slug))
+            except SyntaxError as exc:
+                raise MintError(f"pack {record['key']!r} file {path!r} does not parse: {exc}") from exc
+    return record
+
+
+def concrete_files(record: dict) -> dict[str, str]:
+    """A pack record's files with __PKG__ substituted — a runnable project."""
+    slug = record["default_slug"]
+    return {
+        path.replace("__PKG__", slug): content.replace("__PKG__", slug)
+        for path, content in record["files"].items()
+    }
 
 
 def mint_report(record: dict, tests_run: int) -> dict:

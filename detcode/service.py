@@ -38,9 +38,11 @@ from .engines import (
 )
 
 from .engines import teach as teach_engine
+from .engines.mint import MintError
 from .store import StoreError
 
 REFUSALS = (
+    MintError,
     rewrite.Unsafe,
     builder.BuildError,
     teach_engine.TeachError,
@@ -139,6 +141,32 @@ def run_request(req, store=None) -> dict:
             resp = _generated(builder.render(project), project.report)
             resp["files"] = {f.path: f.content for f in project.files}
             return resp
+        if tool == "mint":
+            from .engines import mint as mint_engine
+
+            if store is None:
+                return {
+                    "ok": False,
+                    "refused": True,
+                    "error": "minting needs a pack store (not available here)",
+                }
+            record = mint_engine.mint_record(
+                req.get("files") or {},
+                list(req.get("keywords") or []),
+                key=req.get("key") or None,
+                title=req.get("title") or None,
+                description=req.get("description") or None,
+            )
+            result = mint_engine.materialize_and_verify(
+                req.get("files") or {}, record["default_slug"]
+            )
+            store.upsert_pack(record)
+            return _text(
+                f"minted pack {record['key']!r} — {result.testsRun} test(s) verified "
+                f"green; directions mentioning {', '.join(record['keywords'])} now "
+                "retrieve this project",
+                mint_engine.mint_report(record, result.testsRun),
+            )
         if tool == "plan":
             from .engines import plan as plan_engine
 

@@ -152,6 +152,9 @@
       <div class="sb-title">TEACH FROM ACTIVE FILE</div>
       <div class="sb-note" id="teach-note">Verified functions join the corpus; every future project can retrieve them.</div>
       <div class="sb-section" id="teach-fns"></div>
+      <div class="sb-title">MINT THIS PROJECT</div>
+      <div class="sb-note">A green-tested workspace becomes a pack: future directions with your keywords retrieve the whole project.</div>
+      <div class="sb-section"><button class="sb-btn" id="mint-btn">Mint this project…</button></div>
       <div class="sb-title">GRAMMAR</div>
       <div class="sb-note" id="grammar-note">Deterministic, never guesses: unknown commands are refused with the closest supported form.</div>
     </div>
@@ -586,6 +589,11 @@ function renderTeachList() {
         `<button class="sb-btn ghost" data-teach="${esc(n)}">⚡ teach ${esc(n)}</button>`).join("")
     : '<div class="sb-note">No top-level functions in the active file.</div>';
 }
+$("mint-btn").addEventListener("click", () => {
+  const kw = prompt("Keywords for this pack (comma-separated):", "");
+  if (kw && kw.trim()) runCommand(`mint ${kw.trim()}`);
+});
+
 $("teach-fns").addEventListener("click", e => {
   const b = e.target.closest("[data-teach]");
   if (!b) return;
@@ -633,8 +641,42 @@ const HELP = [
   ["ls", "list loaded files"],
   ["open <path>", "open a file in the editor"],
   ['new "<direction>"', "generate a project into the Explorer (e.g. new \"a resume tailorer\")"],
+  ["mint <kw1,kw2>", "mint the workspace as a pack (its tests must pass)"],
   ["<anything else>", "sent to the engine as English, acting on the active file"],
 ].map(([c, d]) => `  <span class="ok">${c.padEnd(22)}</span><span class="dim">${d}</span>`).join("\n");
+
+function projectFiles() {
+  if (!folderName || files.size === 0) return null;
+  const prefix = folderName + "/";
+  const map = {};
+  for (const [path, f] of files) {
+    if (path.startsWith(prefix)) map[path.slice(prefix.length)] = f.content;
+  }
+  return Object.keys(map).length ? map : null;
+}
+
+async function runMint(keywordText) {
+  const keywords = keywordText.split(/[,\s]+/).filter(Boolean);
+  const map = projectFiles();
+  if (!map) {
+    termPrint('<span class="err">no workspace to mint — open a folder or generate a project first</span>');
+    return;
+  }
+  if (!keywords.length) {
+    termPrint('<span class="err">give keywords: mint studybuddy,revision</span>');
+    return;
+  }
+  try {
+    const resp = await api({ tool: "mint", files: map, keywords });
+    if (resp.ok) {
+      termPrint(`<span class="ok">✓ ${esc(resp.output)}</span>`);
+    } else {
+      termPrint(`<span class="err">${resp.refused ? "refused" : "error"}: ${esc(resp.error)}</span>`);
+    }
+  } catch (err) {
+    termPrint(`<span class="err">request failed: ${esc(String(err))}</span>`);
+  }
+}
 
 async function runCommand(raw) {
   termPrint(`<span class="tp">detcode&gt;</span> ${esc(raw)}`);
@@ -650,6 +692,13 @@ async function runCommand(raw) {
     const path = cmd.slice(5).trim();
     if (files.has(path)) openFile(path);
     else termPrint(`<span class="err">no such file: ${esc(path)} (try ls)</span>`);
+    return;
+  }
+
+  const mintMatch = /^mint\s+(.+)$/.exec(cmd);
+  if (mintMatch) { await runMint(mintMatch[1].trim()); return; }
+  if (cmd === "mint") {
+    termPrint('<span class="err">give keywords: mint studybuddy,revision</span>');
     return;
   }
 

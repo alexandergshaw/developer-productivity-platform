@@ -118,16 +118,23 @@ detcode corpus export --out team.json # canonical JSON — commit it to share
 detcode corpus import team.json      # fully verified before merging
 
 detcode mint --keywords "studybuddy,revision"  # a green project becomes a PACK
-detcode packs                         # built-in and minted packs
+detcode packs list                    # built-in and minted packs
+detcode packs export --out packs.json # commit to share packs between machines
+detcode packs import packs.json       # verified: structure, parse, TESTS GREEN
 detcode new "a studybuddy for revision season" # retrieves the whole project
 ```
 
 Functions are *taught* (corpus), projects are *minted* (packs) — both
 proof-carrying: teaching verifies in isolation, minting requires the
 project's own tests green, and everything is hash-verified on every load.
-The workbench teaches too: the "TEACH FROM ACTIVE FILE" panel and
-`teach <func> where <func>(...) == ...` in the terminal persist through the
-server's store.
+The workbench teaches and mints too: the "TEACH FROM ACTIVE FILE" panel,
+`teach <func> where <func>(...) == ...` in the terminal, and "Mint this
+project…" / `mint kw1,kw2` (the workspace's tests run server-side and must
+pass) all persist through the server's store.
+
+Plan mode also suggests function names mined from the direction's verbs —
+"a citation formatter that parses bibtex" seeds `format_citation` and
+`parse_bibtex` in the plan, examples left for you to fill.
 
 Each capability also has a direct subcommand:
 

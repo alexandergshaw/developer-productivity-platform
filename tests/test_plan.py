@@ -39,7 +39,9 @@ class PlanModeTests(unittest.TestCase):
         self.assertIn("examples ARE the spec", result.questions)
         self.assertEqual(result.plan["name"], "citation_formatter")
         self.assertEqual(result.plan["detcode_plan"], 1)
-        self.assertTrue(result.plan["functions"][0]["examples"])
+        # The direction's agent noun becomes a suggested function to fill in.
+        self.assertEqual(result.plan["functions"][0]["name"], "format_citation")
+        self.assertEqual(result.plan["functions"][0]["examples"], [])
         json.loads(result.plan_text)  # round-trips
 
     def test_plan_notes_when_a_pack_already_matches(self):

@@ -338,13 +338,81 @@ def _cmd_mint(args) -> int:
     return 0
 
 
-def _cmd_packs(args) -> int:
+def _cmd_packs_list(args) -> int:
     from . import packs as packs_module
 
     for pack in packs_module.registry()[:-1]:
         print(f"{pack.key}  [built-in]  keywords: {', '.join(sorted(pack.keywords))}")
     for pack in _user_packs():
         print(f"{pack.key}  [minted]    keywords: {', '.join(sorted(pack.keywords))}")
+    return 0
+
+
+def _pack_records_from_store() -> list[dict]:
+    return [
+        {
+            "key": p.key,
+            "title": p.title,
+            "default_slug": p.default_slug,
+            "keywords": sorted(p.keywords),
+            "description": p.description,
+            "files": p.files(),
+        }
+        for p in _user_packs()
+    ]
+
+
+def _cmd_packs_export(args) -> int:
+    records = _pack_records_from_store()
+    if args.key:
+        records = [r for r in records if r["key"] == args.key]
+        if not records:
+            raise mint_engine.MintError(f"no minted pack named {args.key!r}")
+    if not records:
+        raise mint_engine.MintError("nothing to export — mint a pack first")
+    text = json.dumps(
+        {"detcode_packs": 1, "packs": sorted(records, key=lambda r: r["key"])},
+        indent=2,
+        sort_keys=True,
+    ) + "\n"
+    if args.out:
+        _write(args.out, text)
+        print(f"{args.out}: exported {len(records)} pack(s) (commit this file to share)", file=sys.stderr)
+    else:
+        sys.stdout.write(text)
+    return 0
+
+
+def _cmd_packs_import(args) -> int:
+    from . import store as store_module
+
+    try:
+        data = json.loads(_read(args.file))
+    except json.JSONDecodeError as exc:
+        raise mint_engine.MintError(f"not valid JSON: {exc}") from exc
+    if not isinstance(data, dict) or data.get("detcode_packs") != 1:
+        raise mint_engine.MintError('not a detcode packs file (expected {"detcode_packs": 1, ...})')
+    records = data.get("packs")
+    if not isinstance(records, list) or not records:
+        raise mint_engine.MintError("packs file has no packs")
+
+    # Full verification BEFORE anything merges: structure, parse, and the
+    # pack's own tests run green — same proof-carrying bar as minting.
+    verified = []
+    for record in records:
+        mint_engine.validate_pack_record(record)
+        result = mint_engine.materialize_and_verify(
+            mint_engine.concrete_files(record), record["default_slug"]
+        )
+        verified.append((record, result.testsRun))
+
+    store = store_module.Store()
+    for record, tests_run in verified:
+        store.upsert_pack(record)
+        print(
+            f"{store.path}: imported pack {record['key']!r} ({tests_run} test(s) verified green)",
+            file=sys.stderr,
+        )
     return 0
 
 
@@ -494,8 +562,17 @@ def build_parser() -> argparse.ArgumentParser:
     mt.add_argument("--description", help="pack description")
     mt.set_defaults(handler=_cmd_mint)
 
-    pk = sub.add_parser("packs", help="list built-in and minted packs")
-    pk.set_defaults(handler=_cmd_packs)
+    pk = sub.add_parser("packs", help="list, export, and import project packs")
+    pk_sub = pk.add_subparsers(dest="packs_command", required=True)
+    pk_list = pk_sub.add_parser("list", help="built-in and minted packs")
+    pk_list.set_defaults(handler=_cmd_packs_list)
+    pk_exp = pk_sub.add_parser("export", help="canonical JSON for committing/sharing")
+    pk_exp.add_argument("--key", help="export only this pack (default: all minted)")
+    pk_exp.add_argument("--out", help="write to this path (default: stdout)")
+    pk_exp.set_defaults(handler=_cmd_packs_export)
+    pk_imp = pk_sub.add_parser("import", help="verify (tests must pass) and merge shared packs")
+    pk_imp.add_argument("file", help="packs JSON file to import")
+    pk_imp.set_defaults(handler=_cmd_packs_import)
 
     rp = sub.add_parser(
         "repair", help="repair a buggy function so it passes input/output tests"

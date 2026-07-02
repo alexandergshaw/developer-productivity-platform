@@ -131,6 +131,29 @@ class StudyLoopTests(unittest.TestCase):
         self.assertIn("def f(x)", resp["output"])
 
 
+class SeedTests(unittest.TestCase):
+    def test_every_seed_entry_verifies(self):
+        for name in knowledge.seed_names():
+            entries = knowledge.seed_entries(name)
+            self.assertGreaterEqual(len(entries), 3, name)
+            for entry in entries:
+                self.assertTrue(entry["sources"] or entry["examples"], entry["topic"])
+
+    def test_unknown_seed_refused(self):
+        with self.assertRaises(KnowledgeError):
+            knowledge.seed_entries("astrology")
+
+    def test_seeded_knowledge_answers_asks(self):
+        entries = knowledge.seed_entries("git-workflow")
+        answer = knowledge.ask(
+            "should I rebase or merge my feature branch", extra_entries=entries
+        )
+        self.assertEqual(answer.topic, "Rebase vs merge")
+
+    def test_seed_names_deterministic(self):
+        self.assertEqual(knowledge.seed_names(), sorted(knowledge.seed_names()))
+
+
 class AdviseTests(unittest.TestCase):
     SOURCE = (
         "import os\n\n\n"

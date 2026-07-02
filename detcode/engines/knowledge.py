@@ -289,6 +289,114 @@ BUILTIN_KNOWLEDGE: tuple[dict, ...] = (
 
 
 # --------------------------------------------------------------------------- #
+# seed collections: curated knowledge you can install, like packs
+# --------------------------------------------------------------------------- #
+SEED_COLLECTIONS: dict[str, tuple[dict, ...]] = {
+    "testing": (
+        _b(
+            "Test one behavior per test",
+            ["test", "tests", "assert", "behavior", "unit", "naming"],
+            "A test that asserts five things reports one failure and hides "
+            "four. One behavior per test, named after the behavior "
+            "(test_rejects_negative_amounts), so a red suite reads as a spec "
+            "of what broke. Shared setup goes in setUp/fixtures, not "
+            "copy-paste.",
+            sources=["https://docs.python.org/3/library/unittest.html"],
+        ),
+        _b(
+            "Characterization tests for legacy code",
+            ["legacy", "characterization", "refactor", "refactoring", "coverage", "golden"],
+            "Before changing code you don't understand, pin its CURRENT "
+            "behavior: feed it inputs, record outputs, assert them (detcode's "
+            "gentest edge cases do exactly this). Then refactor under the net. "
+            "The tests document what IS, not what should be — rename them or "
+            "tighten them once intent is clear.",
+            sources=["https://en.wikipedia.org/wiki/Characterization_test"],
+        ),
+        _b(
+            "Test doubles: fake at the boundary",
+            ["mock", "mocks", "mocking", "stub", "fake", "double", "network", "io"],
+            "Mock the boundary (network, clock, filesystem), not your own "
+            "logic — tests full of mocks of your own classes verify wiring, "
+            "not behavior. Prefer a fake (in-memory implementation) over a "
+            "mock with scripted answers; fakes survive refactors.",
+            sources=["https://martinfowler.com/articles/mocksArentStubs.html"],
+        ),
+    ),
+    "git-workflow": (
+        _b(
+            "Commit messages that explain why",
+            ["commit", "commits", "message", "messages", "history", "log"],
+            "The diff already says WHAT changed; the message must say WHY: "
+            "the constraint, the bug, the decision. Subject line imperative "
+            "and under ~70 chars, body wraps the reasoning. Your future "
+            "bisect session reads only the messages.",
+            sources=["https://cbea.ms/git-commit/"],
+        ),
+        _b(
+            "Rebase vs merge",
+            ["rebase", "merge", "branch", "branches", "conflict", "linear"],
+            "Rebase your OWN unpushed work to keep history linear and "
+            "reviewable; merge shared branches — rewriting pushed history "
+            "breaks everyone downstream. Golden rule: never rebase commits "
+            "that exist outside your machine.",
+            sources=["https://git-scm.com/book/en/v2/Git-Branching-Rebasing"],
+        ),
+        _b(
+            "git bisect finds the breaking commit",
+            ["bisect", "regression", "debug", "debugging", "broke", "bug"],
+            "When something broke 'at some point', don't read diffs — binary "
+            "search them: git bisect start; git bisect bad; git bisect good "
+            "<known-good>. With a test script, `git bisect run` automates the "
+            "whole hunt. Small, single-purpose commits make bisect surgical.",
+            sources=["https://git-scm.com/docs/git-bisect"],
+        ),
+    ),
+    "api-design": (
+        _b(
+            "Idempotency in APIs",
+            ["idempotent", "idempotency", "retry", "retries", "api", "duplicate"],
+            "Networks retry; if a retried request charges twice, that is your "
+            "bug. Make writes idempotent: PUT over POST where natural, or "
+            "accept an idempotency key and return the original result for a "
+            "repeat. GET/PUT/DELETE should always be safe to repeat.",
+            sources=["https://developer.mozilla.org/en-US/docs/Glossary/Idempotent"],
+        ),
+        _b(
+            "Pagination from day one",
+            ["pagination", "paging", "cursor", "offset", "list", "endpoint"],
+            "An unpaginated list endpoint works until the table grows, then "
+            "times out in production. Cursor pagination (opaque token) stays "
+            "stable under inserts; offset pagination skips/duplicates rows "
+            "when data moves. Return the next cursor with every page.",
+            sources=["https://cloud.google.com/apis/design/design_patterns#list_pagination"],
+        ),
+        _b(
+            "Version for breaking changes only",
+            ["version", "versioning", "breaking", "compatibility", "deprecate"],
+            "Additive changes (new optional fields, new endpoints) need no "
+            "version bump — clients ignoring unknown fields keep working. "
+            "Version (path or header) only for breaking shape changes, and "
+            "run the old version through a deprecation window you announce.",
+            sources=["https://cloud.google.com/apis/design/versioning"],
+        ),
+    ),
+}
+
+
+def seed_names() -> list[str]:
+    return sorted(SEED_COLLECTIONS)
+
+
+def seed_entries(name: str) -> tuple[dict, ...]:
+    if name not in SEED_COLLECTIONS:
+        raise KnowledgeError(
+            f"no seed collection {name!r}; available: {', '.join(seed_names())}"
+        )
+    return tuple(_validate_entry(dict(e)) for e in SEED_COLLECTIONS[name])
+
+
+# --------------------------------------------------------------------------- #
 # ask / learn / study
 # --------------------------------------------------------------------------- #
 def _score(entry: dict, question_words: set[str]) -> int:

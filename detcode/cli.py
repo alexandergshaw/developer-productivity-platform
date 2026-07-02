@@ -336,6 +336,42 @@ def _cmd_knowledge_export(args) -> int:
     return 0
 
 
+def _cmd_knowledge_seeds(args) -> int:
+    from .engines import knowledge
+
+    for name in knowledge.seed_names():
+        topics = ", ".join(e["topic"] for e in knowledge.SEED_COLLECTIONS[name])
+        print(f"{name}: {topics}")
+    print("\ninstall one: detcode knowledge seed <name>", file=sys.stderr)
+    return 0
+
+
+def _cmd_knowledge_seed(args) -> int:
+    from . import store as store_module
+    from .engines import knowledge
+
+    entries = knowledge.seed_entries(args.name)  # validated + examples verified
+    store = store_module.Store()
+    existing = {e["topic"]: e for e in knowledge.load_knowledge(store.knowledge_text())}
+    existing.update({e["topic"]: e for e in entries})
+    merged = json.dumps(
+        {"detcode_knowledge": 1, "entries": sorted(existing.values(), key=lambda e: e["topic"])},
+        indent=2, sort_keys=True,
+    ) + "\n"
+    count = store.replace_knowledge(merged, action=f"seed:{args.name}")
+    closed = []
+    for entry in entries:
+        closed.extend(store.close_questions(entry["keywords"], entry["topic"]))
+    print(
+        f"{store.path}: seeded {args.name!r} ({len(entries)} topic(s)); "
+        f"knowledge now {count}",
+        file=sys.stderr,
+    )
+    for question in closed:
+        print(f"  answers open question: {question}", file=sys.stderr)
+    return 0
+
+
 def _cmd_knowledge_import(args) -> int:
     from . import store as store_module
     from .engines import knowledge
@@ -704,6 +740,11 @@ def build_parser() -> argparse.ArgumentParser:
     kn_imp = kn_sub.add_parser("import", help="re-verify and merge a shared knowledge file")
     kn_imp.add_argument("file", help="knowledge JSON file to import")
     kn_imp.set_defaults(handler=_cmd_knowledge_import)
+    kn_seeds = kn_sub.add_parser("seeds", help="curated seed collections available to install")
+    kn_seeds.set_defaults(handler=_cmd_knowledge_seeds)
+    kn_seed = kn_sub.add_parser("seed", help="install a curated seed collection")
+    kn_seed.add_argument("name", help="collection name (see: knowledge seeds)")
+    kn_seed.set_defaults(handler=_cmd_knowledge_seed)
 
     mt = sub.add_parser(
         "mint", help="turn a finished, green-tested project into a reusable pack"

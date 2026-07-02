@@ -838,7 +838,8 @@ def _cmd_new(args) -> int:
         )
     elif args.direction:
         project = builder.build(
-            args.direction, name=args.name, web=args.web, extra_packs=_user_packs()
+            args.direction, name=args.name, web=args.web, extra_packs=_user_packs(),
+            stack=args.stack,
         )
     else:
         raise builder.BuildError('give a direction (detcode new "...") or --plan file.json')
@@ -1138,7 +1139,12 @@ def build_parser() -> argparse.ArgumentParser:
     nw.add_argument("--name", help="override the derived package name")
     nw.add_argument(
         "--web", action="store_true",
-        help="add a stdlib WSGI web UI over the CLI (also triggered by 'with a web ui')",
+        help="add the stack's web UI over the CLI (also triggered by 'with a web ui')",
+    )
+    nw.add_argument(
+        "--stack",
+        help="tech stack: stdlib (default), flask, fastapi, node — also inferred "
+        'from the direction ("a todo app in flask")',
     )
     nw.add_argument("--corpus", help="user corpus for --plan builds (default: .detcode/corpus.json)")
     nw.add_argument(

@@ -7,7 +7,7 @@ package so it is unit-testable without HTTP. Refusals — the deliberate
 Request shape::
 
     {"tool": "do",       "command": "...", "source": "..."?}
-    {"tool": "new",      "direction": "..."}
+    {"tool": "new",      "direction": "...", "stack": "stdlib|flask|fastapi|node"?}
     {"tool": "synth",    "spec": {...}}
     {"tool": "scaffold", "spec": {...}}
     {"tool": "gentest",  "spec": {...}}
@@ -141,6 +141,7 @@ def run_request(req, store=None) -> dict:
                     str(req.get("direction") or ""),
                     web=bool(req.get("web")),
                     extra_packs=tuple(store.user_packs()) if store is not None else (),
+                    stack=str(req["stack"]) if req.get("stack") else None,
                 )
             resp = _generated(builder.render(project), project.report)
             resp["files"] = {f.path: f.content for f in project.files}

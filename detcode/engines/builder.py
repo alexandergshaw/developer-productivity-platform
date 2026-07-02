@@ -14,15 +14,16 @@ import re
 from dataclasses import dataclass
 
 from ..determinism import provenance
-from .. import packs
+from .. import packs, stacks
 
-RULE_VERSION = "1"
+RULE_VERSION = "2"
 
 # Words that carry no domain meaning in a direction.
 _DIRECTION_NOISE = frozenset(
     "a an the build make create start new me my for of and or to app apps "
     "application project projects tool please that will can helps help with "
-    "some this it web ui website browser frontend interface webapp module".split()
+    "some this it web ui website browser frontend interface webapp module "
+    "in using via on".split()
 )
 
 # Direction words that request the --web wrapper.
@@ -52,7 +53,9 @@ def _words(direction: str) -> list[str]:
 
 
 def _slug(direction: str) -> str:
-    meaningful = [w for w in _words(direction) if w not in _DIRECTION_NOISE]
+    # Stack words name the chassis, not the domain — they never enter a slug.
+    drop = _DIRECTION_NOISE | stacks.all_keywords()
+    meaningful = [w for w in _words(direction) if w not in drop]
     slug = "_".join(meaningful[:4])
     if not slug:
         return "new_project"
@@ -80,11 +83,33 @@ def _order_matches(direction: str, matches: list) -> list:
     return [m for _, m in sorted(enumerate(matches), key=first_position)]
 
 
+def _resolve_stack(words: set, requested: str | None) -> tuple:
+    """(stack, why) — explicit request wins, then direction keywords, then default."""
+    if requested:
+        stack = stacks.get(requested)
+        if stack is None:
+            known = ", ".join(s.key for s in stacks.registry())
+            raise BuildError(f"unknown tech stack {requested!r} — supported: {known}")
+        return stack, "requested explicitly"
+    matched = stacks.match(words)
+    if len(matched) > 1:
+        names = " vs ".join(f"{s.title} ({', '.join(h)})" for s, h in matched)
+        raise BuildError(f"one tech stack per project — the direction names {names}")
+    if matched:
+        stack, hits = matched[0]
+        return stack, f"matched keyword(s): {', '.join(hits)}"
+    return stacks.default(), (
+        'the default — pick another with --stack or in the direction, '
+        'e.g. "in flask", "using fastapi", "with node"'
+    )
+
+
 def elaborate(
     direction: str,
     name: str | None = None,
     web: bool = False,
     extra_packs: tuple = (),
+    stack: str | None = None,
 ) -> dict:
     """Derive the build plan from the direction, recording every decision."""
     if not isinstance(direction, str) or not direction.strip():
@@ -92,10 +117,29 @@ def elaborate(
 
     decisions: list[str] = []
     words = set(_words(direction))
-    web = web or bool(words & _WEB_WORDS)
+
+    stack_obj, stack_why = _resolve_stack(words, stack)
+    web = web or bool(words & _WEB_WORDS) or stack_obj.web_always
+    decisions.append(f"tech stack: {stack_obj.title} ({stack_why}) — {stack_obj.description}")
 
     matches = _order_matches(direction, packs.match_all(words, extra_packs))
-    if not matches:
+    python_core = stack_obj.language == "python"
+    if not python_core:
+        if matches:
+            names = ", ".join(f"{p.title} ({', '.join(h)})" for p, h in matches)
+            decisions.append(
+                f"matched domain pack(s) {names}, but packs are Python-only — the "
+                f"{stack_obj.title} project ships the skeleton with the domain "
+                "logic marked TODO (the honest deterministic boundary)"
+            )
+        else:
+            decisions.append(
+                f"generating the {stack_obj.title} skeleton — structure is "
+                "derivable, novel domain logic is not"
+            )
+        if not matches:
+            matches = [(packs.registry()[-1], [])]
+    elif not matches:
         generic = packs.registry()[-1]
         matches = [(generic, [])]
         decisions.append(
@@ -133,19 +177,30 @@ def elaborate(
     for pack, _hits in matches[1:]:
         pack_slugs.append((pack, pack.default_slug))
 
-    entrypoints = " / ".join(f"python -m {s}" for _, s in pack_slugs)
-    if web:
+    if not python_core:
         decisions.append(
-            f"interface: command-line ({entrypoints}) plus a stdlib WSGI web UI "
-            "over the primary CLI (python devserver.py) — the same pattern "
-            "detcode's own playground uses"
+            "interface: command-line (node src/cli.js) plus a web UI "
+            "(node server.js) — dependency-free node:http"
         )
+        decisions.append("test suite included; run: node --test")
     else:
-        decisions.append(
-            f"interface: command-line ({entrypoints}) — deterministic core "
-            "first; a UI can wrap it later (--web or say 'with a web ui')"
-        )
-    decisions.append("test suite included; run: python -m unittest discover -s tests")
+        entrypoints = " / ".join(f"python -m {s}" for _, s in pack_slugs)
+        if web:
+            tail = (
+                " — the same pattern detcode's own playground uses"
+                if stack_obj.key == "stdlib"
+                else ""
+            )
+            decisions.append(
+                f"interface: command-line ({entrypoints}) plus {stack_obj.web_label} "
+                f"over the primary CLI (python devserver.py){tail}"
+            )
+        else:
+            decisions.append(
+                f"interface: command-line ({entrypoints}) — deterministic core "
+                "first; a UI can wrap it later (--web or say 'with a web ui')"
+            )
+        decisions.append("test suite included; run: python -m unittest discover -s tests")
 
     return {
         "direction": direction.strip(),
@@ -154,6 +209,7 @@ def elaborate(
         "pack": primary,
         "pack_slugs": pack_slugs,
         "web": web,
+        "stack": stack_obj,
         "decisions": decisions,
     }
 
@@ -169,9 +225,15 @@ def _readme(plan: dict) -> str:
         "",
     ]
     lines.extend(f"- {d}" for d in plan["decisions"])
-    usage = [f"python -m {plan['slug']} --help"]
-    if plan.get("web"):
-        usage.append("python devserver.py    # web UI at http://127.0.0.1:8000")
+    stack = plan.get("stack")
+    if stack is None or stack.key == "stdlib":
+        usage = [f"python -m {plan['slug']} --help"]
+        if plan.get("web"):
+            usage.append("python devserver.py    # web UI at http://127.0.0.1:8000")
+        dev = ["python -m unittest discover -s tests"]
+    else:
+        usage = [line.replace("__PKG__", plan["slug"]) for line in stack.usage]
+        dev = [line.replace("__PKG__", plan["slug"]) for line in stack.dev]
     lines.extend(
         [
             "",
@@ -184,19 +246,35 @@ def _readme(plan: dict) -> str:
             "## Development",
             "",
             "```bash",
-            "python -m unittest discover -s tests",
-            "```",
-            "",
-            "## Growing this project with detcode",
-            "",
-            "```bash",
-            'detcode do "write a function <name> where <name>(...) == ..."',
-            f'detcode do "add a docstring to <func>" --file {plan["slug"]}/core.py --write',
-            f'detcode gentest --spec examples.json --file {plan["slug"]}/core.py',
+            *dev,
             "```",
             "",
         ]
     )
+    if stack is None or stack.language == "python":
+        lines.extend(
+            [
+                "## Growing this project with detcode",
+                "",
+                "```bash",
+                'detcode do "write a function <name> where <name>(...) == ..."',
+                f'detcode do "add a docstring to <func>" --file {plan["slug"]}/core.py --write',
+                f'detcode gentest --spec examples.json --file {plan["slug"]}/core.py',
+                "```",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "## Growing this project with detcode",
+                "",
+                "detcode's example-driven tools (do / gentest / teach) synthesize",
+                "Python; on this stack, grow `src/core.js` by hand — or rebuild the",
+                "same direction on a Python stack to get the domain packs.",
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -216,8 +294,22 @@ def _ci_workflow(slug: str) -> str:
     )
 
 
+def _ci_workflow_node() -> str:
+    return (
+        "name: ci\n\non:\n  push:\n  pull_request:\n\njobs:\n  test:\n"
+        "    runs-on: ubuntu-latest\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: actions/setup-node@v4\n"
+        '        with: { node-version: "22" }\n'
+        "      - name: Tests\n"
+        "        run: node --test\n"
+    )
+
+
 def _pyproject(plan: dict) -> str:
     includes = ", ".join(f'"{s}*"' for _, s in plan["pack_slugs"])
+    stack = plan.get("stack")
+    deps = ", ".join(f'"{d}"' for d in (stack.dependencies if stack else ()))
     return (
         "[build-system]\n"
         'requires = ["setuptools>=68"]\n'
@@ -228,7 +320,7 @@ def _pyproject(plan: dict) -> str:
         'version = "0.1.0"\n'
         f'description = "{plan["title"]} (generated by detcode)"\n'
         'requires-python = ">=3.10"\n'
-        "dependencies = []\n"
+        f"dependencies = [{deps}]\n"
         "\n"
         "[project.scripts]\n"
         f'{plan["slug"].replace("_", "-")} = "{plan["slug"]}.cli:main"\n'
@@ -243,25 +335,52 @@ def build(
     name: str | None = None,
     web: bool = False,
     extra_packs: tuple = (),
+    stack: str | None = None,
 ) -> Project:
     """Build a complete project from a general direction.
 
     A direction matching several packs ("a teaching assistant with a resume
     module") composes them: each pack's package lands in the same project.
-    ``web=True`` (or "with a web ui" in the direction) adds a stdlib WSGI
-    wrapper over the primary package's CLI. ``extra_packs`` holds user-minted
-    packs (hash-verified by the store on load).
+    ``web=True`` (or "with a web ui" in the direction) adds the stack's web
+    layer over the primary package's CLI. ``stack`` picks the tech stack
+    explicitly; otherwise stack keywords in the direction ("in flask",
+    "using fastapi", "with node") decide, falling back to Python stdlib.
+    ``extra_packs`` holds user-minted packs (hash-verified by the store on load).
     """
-    plan = elaborate(direction, name, web, extra_packs)
+    plan = elaborate(direction, name, web, extra_packs, stack)
     slug = plan["slug"]
+    stack_obj = plan["stack"]
+
+    if stack_obj.language != "python":
+        # Non-Python chassis: the stack's own skeleton, no Python packaging.
+        merged = {
+            raw_path.replace("__PKG__", slug): raw_content.replace("__PKG__", slug)
+            for raw_path, raw_content in sorted(stack_obj.skeleton().items())
+        }
+        files = [ProjectFile(p, c) for p, c in merged.items()]
+        files.append(ProjectFile("README.md", _readme(plan)))
+        files.append(ProjectFile(".gitignore", "node_modules/\n*.log\n"))
+        files.append(ProjectFile(".github/workflows/ci.yml", _ci_workflow_node()))
+        files.sort(key=lambda f: f.path)
+        report = provenance(
+            "build",
+            RULE_VERSION,
+            stack=stack_obj.key,
+            pack=None,
+            packs=[],
+            package=slug,
+            packages=[slug],
+            web=plan["web"],
+            decisions=plan["decisions"],
+            files=[f.path for f in files],
+        )
+        return Project(slug, plan["title"], tuple(files), report)
 
     template_sets = [
         (pack.files(), pack_slug) for pack, pack_slug in plan["pack_slugs"]
     ]
     if plan["web"]:
-        from ..packs import webwrap
-
-        template_sets.append((webwrap.files(), slug))
+        template_sets.append((stack_obj.web_files(), slug))
 
     merged: dict[str, str] = {}
     for templates, pack_slug in template_sets:
@@ -287,6 +406,7 @@ def build(
     report = provenance(
         "build",
         RULE_VERSION,
+        stack=stack_obj.key,
         pack=plan["pack"].key,
         packs=[p.key for p, _ in plan["pack_slugs"]],
         package=slug,

@@ -16,7 +16,23 @@ from dataclasses import dataclass
 from ..determinism import provenance
 from .. import packs, stacks
 
-RULE_VERSION = "2"
+RULE_VERSION = "3"
+
+_EDITORCONFIG = """root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 4
+
+[*.{js,jsx,ts,tsx,json,yml,yaml,html,css,toml}]
+indent_size = 2
+
+[*.go]
+indent_style = tab
+"""
 
 # Words that carry no domain meaning in a direction.
 _DIRECTION_NOISE = frozenset(
@@ -178,11 +194,7 @@ def elaborate(
         pack_slugs.append((pack, pack.default_slug))
 
     if not python_core:
-        decisions.append(
-            "interface: command-line (node src/cli.js) plus a web UI "
-            "(node server.js) — dependency-free node:http"
-        )
-        decisions.append("test suite included; run: node --test")
+        decisions.append(stack_obj.interface_line)
     else:
         entrypoints = " / ".join(f"python -m {s}" for _, s in pack_slugs)
         if web:
@@ -193,14 +205,14 @@ def elaborate(
             )
             decisions.append(
                 f"interface: command-line ({entrypoints}) plus {stack_obj.web_label} "
-                f"over the primary CLI (python devserver.py){tail}"
+                f"over the primary CLI ({stack_obj.web_run}){tail}"
             )
         else:
             decisions.append(
                 f"interface: command-line ({entrypoints}) — deterministic core "
                 "first; a UI can wrap it later (--web or say 'with a web ui')"
             )
-        decisions.append("test suite included; run: python -m unittest discover -s tests")
+    decisions.append(f"test suite included; run: {' && '.join(stack_obj.dev)}")
 
     return {
         "direction": direction.strip(),
@@ -270,7 +282,7 @@ def _readme(plan: dict) -> str:
                 "## Growing this project with detcode",
                 "",
                 "detcode's example-driven tools (do / gentest / teach) synthesize",
-                "Python; on this stack, grow `src/core.js` by hand — or rebuild the",
+                "Python; on this stack, grow the core module by hand — or rebuild the",
                 "same direction on a Python stack to get the domain packs.",
                 "",
             ]
@@ -294,16 +306,6 @@ def _ci_workflow(slug: str) -> str:
     )
 
 
-def _ci_workflow_node() -> str:
-    return (
-        "name: ci\n\non:\n  push:\n  pull_request:\n\njobs:\n  test:\n"
-        "    runs-on: ubuntu-latest\n    steps:\n"
-        "      - uses: actions/checkout@v4\n"
-        "      - uses: actions/setup-node@v4\n"
-        '        with: { node-version: "22" }\n'
-        "      - name: Tests\n"
-        "        run: node --test\n"
-    )
 
 
 def _pyproject(plan: dict) -> str:
@@ -359,8 +361,11 @@ def build(
         }
         files = [ProjectFile(p, c) for p, c in merged.items()]
         files.append(ProjectFile("README.md", _readme(plan)))
-        files.append(ProjectFile(".gitignore", "node_modules/\n*.log\n"))
-        files.append(ProjectFile(".github/workflows/ci.yml", _ci_workflow_node()))
+        files.append(ProjectFile(".editorconfig", _EDITORCONFIG))
+        files.append(ProjectFile(".gitignore", stack_obj.gitignore.replace("__PKG__", slug)))
+        files.append(ProjectFile(".github/workflows/ci.yml", stack_obj.ci))
+        if stack_obj.docker:
+            files.append(ProjectFile("Dockerfile", stack_obj.docker.replace("__PKG__", slug)))
         files.sort(key=lambda f: f.path)
         report = provenance(
             "build",
@@ -399,8 +404,11 @@ def build(
     files = [ProjectFile(p, c) for p, c in merged.items()]
     files.append(ProjectFile("README.md", _readme(plan)))
     files.append(ProjectFile("pyproject.toml", _pyproject(plan)))
+    files.append(ProjectFile(".editorconfig", _EDITORCONFIG))
     files.append(ProjectFile(".gitignore", "__pycache__/\n*.py[cod]\n*.egg-info/\n"))
     files.append(ProjectFile(".github/workflows/ci.yml", _ci_workflow(slug)))
+    if stack_obj.docker:
+        files.append(ProjectFile("Dockerfile", stack_obj.docker.replace("__PKG__", slug)))
     files.sort(key=lambda f: f.path)
 
     report = provenance(
@@ -596,6 +604,7 @@ def build_from_plan(plan: dict, web: bool = False, corpus: tuple = ()) -> Projec
         f"tests/test_{slug}.py": tests_py,
         "README.md": _readme(readme_plan),
         "pyproject.toml": _pyproject(readme_plan),
+        ".editorconfig": _EDITORCONFIG,
         ".gitignore": "__pycache__/\n*.py[cod]\n*.egg-info/\n",
         ".github/workflows/ci.yml": _ci_workflow(slug),
     }

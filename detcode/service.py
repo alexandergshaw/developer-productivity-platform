@@ -7,7 +7,8 @@ package so it is unit-testable without HTTP. Refusals — the deliberate
 Request shape::
 
     {"tool": "do",       "command": "...", "source": "..."?}
-    {"tool": "new",      "direction": "...", "stack": "stdlib|flask|fastapi|node"?}
+    {"tool": "new",      "direction": "...",
+     "stack": "stdlib|flask|fastapi|django|node|express|react|typescript|go|rust"?}
     {"tool": "synth",    "spec": {...}}
     {"tool": "scaffold", "spec": {...}}
     {"tool": "gentest",  "spec": {...}}

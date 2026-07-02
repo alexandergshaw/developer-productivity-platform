@@ -81,4 +81,12 @@ STACK = Stack(
         "python devserver.py    # web UI at http://127.0.0.1:8000",
     ),
     dev=("python -m unittest discover -s tests",),
+    docker=(
+        "FROM python:3.12-slim\n"
+        "WORKDIR /app\n"
+        "COPY . .\n"
+        "RUN pip install --no-cache-dir -e .\n"
+        "EXPOSE 8000\n"
+        'CMD ["flask", "--app", "__PKG__.web", "run", "--host=0.0.0.0", "--port=8000"]\n'
+    ),
 )

@@ -561,7 +561,7 @@ const fileHandles = new Map();
 
 const $ = id => document.getElementById(id);
 const E = (name, gi = activeGroup) => $(name + gi);   // group-scoped element
-const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 function syncActive() { active = groups[activeGroup] ? groups[activeGroup].active : null; }
 
 // ---------- file icons ----------
@@ -1684,7 +1684,9 @@ const QUICK = [
   'new "a resume tailorer"',
   'new "a teaching assistant app"',
   'new "a todo app in flask"',
-  'new "an expense tracker with node"',
+  'new "an expense tracker in react"',
+  'new "a study planner in django"',
+  'new "a link shortener in golang"',
   "explain",
   "clean up",
   "document",
@@ -1959,7 +1961,7 @@ const HELP = [
   ["clear", "clear the terminal"],
   ["ls", "list loaded files"],
   ["open <path>", "open a file in the editor"],
-  ['new "<direction>"', 'generate a project — pick a stack with "in flask", "using fastapi", "with node"'],
+  ['new "<direction>"', "generate a project — stacks: flask/fastapi/django/node/express/react/typescript/golang/rust"],
   ["query <question>", "knowledge web: evidence with citations"],
   ["mint <kw1,kw2>", "mint the workspace as a pack (its tests must pass)"],
   ["test", "run the workspace tests server-side"],

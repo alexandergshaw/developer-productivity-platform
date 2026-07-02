@@ -1143,8 +1143,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     nw.add_argument(
         "--stack",
-        help="tech stack: stdlib (default), flask, fastapi, node — also inferred "
-        'from the direction ("a todo app in flask")',
+        help="tech stack: stdlib (default), flask, fastapi, django, node, express, "
+        'react, typescript, go, rust — also inferred from the direction ("a todo app in flask")',
     )
     nw.add_argument("--corpus", help="user corpus for --plan builds (default: .detcode/corpus.json)")
     nw.add_argument(

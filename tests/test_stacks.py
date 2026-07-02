@@ -26,9 +26,20 @@ class RegistryTests(unittest.TestCase):
     def test_get_by_key_and_alias(self):
         self.assertEqual(stacks.get("flask").key, "flask")
         self.assertEqual(stacks.get("FastAPI").key, "fastapi")
-        self.assertEqual(stacks.get("express").key, "node")
+        self.assertEqual(stacks.get("django").key, "django")
+        self.assertEqual(stacks.get("express").key, "express")
         self.assertEqual(stacks.get("javascript").key, "node")
+        self.assertEqual(stacks.get("vite").key, "react")
+        self.assertEqual(stacks.get("ts").key, "typescript")
+        self.assertEqual(stacks.get("go").key, "go")  # by key, not keyword
+        self.assertEqual(stacks.get("golang").key, "go")
+        self.assertEqual(stacks.get("cargo").key, "rust")
         self.assertIsNone(stacks.get("cobol"))
+
+    def test_bare_go_never_hijacks_a_direction(self):
+        # "go" is too common an English word to be a stack keyword.
+        plan = builder.elaborate("an on the go checklist app")
+        self.assertEqual(plan["stack"].key, "stdlib")
 
     def test_match_skips_the_default(self):
         self.assertEqual(stacks.match({"python", "todo"}), [])
@@ -156,6 +167,162 @@ class NodeBuildTests(unittest.TestCase):
             for _ in range(5)
         }
         self.assertEqual(len(renders), 1)
+
+
+class DjangoBuildTests(unittest.TestCase):
+    def test_django_project_shape(self):
+        project = builder.build("a recipe manager in django")
+        paths = paths_of(project)
+        for path in ("manage.py", "config/settings.py", "config/urls.py",
+                     "config/views.py", "config/wsgi.py", "config/asgi.py"):
+            self.assertIn(path, paths)
+        self.assertEqual(project.report["stack"], "django")
+        self.assertIn('dependencies = ["django"]', file_of(project, "pyproject.toml"))
+        for f in project.files:
+            if f.path.endswith(".py"):
+                ast.parse(f.content)
+
+    def test_views_wrap_the_pack_cli(self):
+        project = builder.build("a recipe manager in django")
+        views = file_of(project, "config/views.py")
+        self.assertIn("from recipe_manager.cli import main as cli_main", views)
+        self.assertIn("csrf_exempt", views)
+
+    def test_pack_core_rides_along_and_its_tests_pass(self):
+        project = builder.build("a resume tailorer in django")
+        root = materialize(project)
+        try:
+            result = run_generated_tests(root, project.name)
+            self.assertGreater(result.testsRun, 0)
+            self.assertEqual(result.failures, [])
+            self.assertEqual(result.errors, [])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
+class ExpressBuildTests(unittest.TestCase):
+    def test_express_project_shape(self):
+        project = builder.build("a todo app in express")
+        paths = paths_of(project)
+        for path in ("package.json", "server.js", "src/core.js", "src/cli.js",
+                     "tests/core.test.js", "tests/server.test.js"):
+            self.assertIn(path, paths)
+        manifest = json.loads(file_of(project, "package.json"))
+        self.assertIn("express", manifest["dependencies"])
+        self.assertEqual(project.report["stack"], "express")
+
+    def test_express_is_no_longer_a_node_alias(self):
+        plan = builder.elaborate("a todo app in express")
+        self.assertEqual(plan["stack"].key, "express")
+
+
+class ReactBuildTests(unittest.TestCase):
+    def test_react_project_shape(self):
+        project = builder.build("an expense tracker in react")
+        paths = paths_of(project)
+        for path in ("package.json", "vite.config.js", "index.html", "src/main.jsx",
+                     "src/App.jsx", "src/styles.css", "src/lib/core.js", "tests/core.test.js"):
+            self.assertIn(path, paths)
+        manifest = json.loads(file_of(project, "package.json"))
+        self.assertIn("react", manifest["dependencies"])
+        self.assertIn("vite", manifest["devDependencies"])
+        self.assertEqual(project.name, "expense_tracker")
+
+    def test_python_only_boundary_is_recorded(self):
+        project = builder.build("an expense tracker in react")
+        self.assertIn("Python-only", " ".join(project.report["decisions"]))
+
+
+class TypescriptBuildTests(unittest.TestCase):
+    def test_typescript_project_shape(self):
+        project = builder.build("a todo app in typescript")
+        paths = paths_of(project)
+        for path in ("package.json", "tsconfig.json", "src/core.ts", "src/cli.ts",
+                     "src/server.ts", "src/tests/core.test.ts"):
+            self.assertIn(path, paths)
+        tsconfig = json.loads(file_of(project, "tsconfig.json"))
+        self.assertTrue(tsconfig["compilerOptions"]["strict"])
+        self.assertEqual(project.report["stack"], "typescript")
+
+
+class GoBuildTests(unittest.TestCase):
+    def test_go_project_shape(self):
+        project = builder.build("a link shortener in golang")
+        paths = paths_of(project)
+        for path in ("go.mod", "main.go", "page.go", "core/core.go", "core/core_test.go"):
+            self.assertIn(path, paths)
+        self.assertIn("module link_shortener", file_of(project, "go.mod"))
+        self.assertEqual(project.report["stack"], "go")
+
+    def test_go_page_has_no_backticks_inside_the_raw_string(self):
+        # A backtick inside Go's raw string literal would break compilation.
+        project = builder.build("a link shortener in golang")
+        page = file_of(project, "page.go")
+        body = page.split("`", 1)[1].rsplit("`", 1)[0]
+        self.assertNotIn("`", body)
+
+
+class RustBuildTests(unittest.TestCase):
+    def test_rust_project_shape(self):
+        project = builder.build("a markdown parser in rust")
+        paths = paths_of(project)
+        for path in ("Cargo.toml", "src/lib.rs", "src/main.rs", "tests/integration.rs"):
+            self.assertIn(path, paths)
+        self.assertIn('name = "markdown_parser"', file_of(project, "Cargo.toml"))
+        self.assertEqual(project.report["stack"], "rust")
+
+    def test_rust_is_honest_about_no_http(self):
+        project = builder.build("a markdown parser in rust")
+        self.assertIn("no HTTP server", " ".join(project.report["decisions"]))
+
+
+class ComprehensiveExtrasTests(unittest.TestCase):
+    def test_every_stack_ships_editorconfig_gitignore_and_ci(self):
+        directions = {
+            "stdlib": "a widget tool",
+            "flask": "a widget tool in flask",
+            "fastapi": "a widget tool using fastapi",
+            "django": "a widget tool in django",
+            "node": "a widget tool with node",
+            "express": "a widget tool in express",
+            "react": "a widget tool in react",
+            "typescript": "a widget tool in typescript",
+            "go": "a widget tool in golang",
+            "rust": "a widget tool in rust",
+        }
+        for key, direction in directions.items():
+            with self.subTest(stack=key):
+                project = builder.build(direction)
+                paths = paths_of(project)
+                self.assertEqual(project.report["stack"], key)
+                self.assertIn(".editorconfig", paths)
+                self.assertIn(".gitignore", paths)
+                self.assertIn(".github/workflows/ci.yml", paths)
+                self.assertIn("README.md", paths)
+
+    def test_web_stacks_ship_a_dockerfile(self):
+        for direction in ("a tool in flask", "a tool using fastapi", "a tool in django",
+                          "a tool with node", "a tool in express", "a tool in react",
+                          "a tool in typescript", "a tool in golang"):
+            with self.subTest(direction=direction):
+                self.assertIn("Dockerfile", paths_of(builder.build(direction)))
+
+    def test_cli_only_stacks_ship_no_dockerfile(self):
+        self.assertNotIn("Dockerfile", paths_of(builder.build("a tool")))
+        self.assertNotIn("Dockerfile", paths_of(builder.build("a tool in rust")))
+
+    def test_every_stack_is_deterministic(self):
+        for direction in ("a tool in django", "a tool in express", "a tool in react",
+                          "a tool in typescript", "a tool in golang", "a tool in rust"):
+            with self.subTest(direction=direction):
+                renders = {
+                    content_hash(builder.render(builder.build(direction))) for _ in range(3)
+                }
+                self.assertEqual(len(renders), 1)
+
+    def test_go_gitignore_names_the_binary(self):
+        project = builder.build("a link shortener in golang")
+        self.assertIn("link_shortener", file_of(project, ".gitignore"))
 
 
 class ServiceTests(unittest.TestCase):

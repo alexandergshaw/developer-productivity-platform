@@ -183,6 +183,21 @@ def run_request(req, store=None) -> dict:
                 suffix = f"  [answered by: {r['answered_by']}]" if r["answered_by"] else ""
                 lines.append(f"{mark} {r['question']}{suffix}")
             return _text("\n".join(lines), {"open": len(records)})
+        if tool == "packs":
+            from . import packs as packs_module
+
+            items = [
+                {"key": p.key, "title": p.title, "description": p.description,
+                 "origin": "built-in"}
+                for p in packs_module.registry()[:-1]
+            ]
+            if store is not None:
+                items += [
+                    {"key": p.key, "title": p.title, "description": p.description,
+                     "origin": "minted"}
+                    for p in store.user_packs()
+                ]
+            return {"ok": True, "kind": "packs", "items": items}
         if tool == "query":
             from .engines import web as web_engine
 

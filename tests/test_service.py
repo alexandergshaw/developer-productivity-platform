@@ -67,6 +67,13 @@ class ServiceTests(unittest.TestCase):
         self.assertTrue(resp["refused"])
         self.assertIn("Closest supported form", resp["error"])
 
+    def test_packs_tool(self):
+        resp = run_request({"tool": "packs"})
+        self.assertTrue(resp["ok"])
+        keys = [i["key"] for i in resp["items"]]
+        self.assertIn("resume-tailorer", keys)
+        self.assertTrue(all(i["origin"] == "built-in" for i in resp["items"]))
+
     def test_unknown_tool(self):
         resp = run_request({"tool": "teleport"})
         self.assertFalse(resp["ok"])

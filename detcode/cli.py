@@ -27,7 +27,16 @@ from .engines import (
     rewrite,
     scaffold,
     synth,
+    teach,
 )
+
+
+def _load_corpus(path_arg: str | None) -> tuple:
+    """User corpus entries: --corpus path, or .detcode/corpus.json if present."""
+    path = path_arg or teach.DEFAULT_CORPUS_PATH
+    if path_arg is None and not os.path.exists(path):
+        return ()
+    return teach.load_corpus(_read(path))
 
 
 class _EditResult:
@@ -97,11 +106,28 @@ def _cmd_scaffold(args) -> int:
     return 0
 
 
+def _cmd_teach(args) -> int:
+    spec = json.loads(_read(args.examples))
+    examples = spec.get("examples") if isinstance(spec, dict) else spec
+    corpus_path = args.corpus or teach.DEFAULT_CORPUS_PATH
+    existing = _read(corpus_path) if os.path.exists(corpus_path) else None
+    result = teach.teach(_read(args.file), args.func, examples, existing)
+    os.makedirs(os.path.dirname(corpus_path) or ".", exist_ok=True)
+    _write(corpus_path, result.corpus_text)
+    print(
+        f"{corpus_path}: taught {args.func!r} "
+        f"({result.report['cases_verified']} example(s) verified, "
+        f"{result.report['corpus_entries']} entr(y/ies) total)",
+        file=sys.stderr,
+    )
+    return 0
+
+
 def _cmd_synth(args) -> int:
     spec = json.loads(_read(args.examples))
     if args.name:
         spec["name"] = args.name
-    result = retrieve.write_function(spec)
+    result = retrieve.write_function(spec, extra=_load_corpus(args.corpus))
     if args.out:
         _write(args.out, result.source)
         print(
@@ -169,7 +195,9 @@ def _cmd_new(args) -> int:
     if args.plan:
         if args.direction:
             raise builder.BuildError("give a direction OR --plan, not both")
-        project = builder.build_from_plan(json.loads(_read(args.plan)), web=args.web)
+        project = builder.build_from_plan(
+            json.loads(_read(args.plan)), web=args.web, corpus=_load_corpus(args.corpus)
+        )
     elif args.direction:
         project = builder.build(args.direction, name=args.name, web=args.web)
     else:
@@ -258,7 +286,17 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--examples", required=True, help="JSON file of input/output examples")
     sy.add_argument("--name", help="name for the synthesized function (default: f)")
     sy.add_argument("--out", help="write the function to this path (default: stdout)")
+    sy.add_argument("--corpus", help="user corpus file (default: .detcode/corpus.json if present)")
     sy.set_defaults(handler=_cmd_synth)
+
+    tc = sub.add_parser(
+        "teach", help="verify a function against examples and add it to the local corpus"
+    )
+    tc.add_argument("--file", required=True, help="Python file containing the function")
+    tc.add_argument("--func", required=True, help="top-level function to teach")
+    tc.add_argument("--examples", required=True, help="JSON: {examples: [...]} or a bare list")
+    tc.add_argument("--corpus", help=f"corpus file (default: {teach.DEFAULT_CORPUS_PATH})")
+    tc.set_defaults(handler=_cmd_teach)
 
     rp = sub.add_parser(
         "repair", help="repair a buggy function so it passes input/output tests"
@@ -315,6 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--web", action="store_true",
         help="add a stdlib WSGI web UI over the CLI (also triggered by 'with a web ui')",
     )
+    nw.add_argument("--corpus", help="user corpus for --plan builds (default: .detcode/corpus.json)")
     nw.add_argument(
         "--dry-run", action="store_true", help="print decisions and file list, write nothing"
     )
@@ -350,6 +389,8 @@ def main(argv: list[str] | None = None) -> int:
         gentest.SpecError,
         document.DocError,
         builder.BuildError,
+        teach.TeachError,
+        teach.CorpusError,
         cnl.CNLError,
         planner.UnknownIntent,
         planner.MissingSource,

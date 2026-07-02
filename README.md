@@ -79,6 +79,33 @@ The generated README lists every decision detcode made and how to grow the
 project with detcode's example-driven tools. Existing files are never
 overwritten — a collision refuses the whole write.
 
+## When detcode doesn't know how to build it: plan → build → teach
+
+For directions beyond the domain packs, detcode runs a deterministic
+*spec interview* instead of dead-ending — the analogue of an LLM asking
+clarifying questions, answered **by example**:
+
+```bash
+detcode plan "a citation formatter"        # interview -> citation_formatter.plan.json
+# fill functions[].examples — the examples ARE the spec
+detcode new --plan citation_formatter.plan.json
+```
+
+Every planned function detcode can derive from its examples (retrieval →
+synthesis) becomes real code with green tests. The rest become stubs whose
+examples ship as `@unittest.expectedFailure` tests — executable TODOs that
+keep the suite green and flip loudly when implemented. Then close the loop:
+
+```bash
+detcode teach --file core.py --func format_authors --examples ex.json
+```
+
+`teach` verifies the function in isolation against its examples and promotes
+it into a local corpus (`.detcode/corpus.json`). Retrieval consults that
+corpus (re-verifying every entry on load — a tampered entry refuses loudly),
+so every future project that needs the function gets it for free: **the
+app's capability grows by acquiring verified artifacts, never statistics.**
+
 Each capability also has a direct subcommand:
 
 ```bash

@@ -115,6 +115,18 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
             files={f.path: f.content for f in project.files},
         )
 
+    if op == "plan":
+        from .engines import plan as plan_engine
+
+        r = plan_engine.make_plan(intent.get("direction") or "")
+        return Outcome(
+            None,
+            r.questions + "\n\n" + r.plan_text,
+            False,
+            r.report,
+            files={r.report["plan_file"]: r.plan_text},
+        )
+
     if op == "gentest":
         spec = _spec(intent)
         # When invoked against a file (CNL "generate tests for f where ..."),

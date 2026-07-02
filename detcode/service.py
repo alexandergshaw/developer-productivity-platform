@@ -117,9 +117,21 @@ def run_request(req) -> dict:
             r = document.add_docstrings(str(req.get("source") or ""), req.get("func") or None)
             return _edit(r.source, r.changed, r.report)
         if tool == "new":
-            project = builder.build(str(req.get("direction") or ""))
+            if isinstance(req.get("plan"), dict):
+                project = builder.build_from_plan(req["plan"], web=bool(req.get("web")))
+            else:
+                project = builder.build(
+                    str(req.get("direction") or ""), web=bool(req.get("web"))
+                )
             resp = _generated(builder.render(project), project.report)
             resp["files"] = {f.path: f.content for f in project.files}
+            return resp
+        if tool == "plan":
+            from .engines import plan as plan_engine
+
+            r = plan_engine.make_plan(str(req.get("direction") or ""))
+            resp = _generated(r.questions + "\n\n" + r.plan_text, r.report)
+            resp["files"] = {r.report["plan_file"]: r.plan_text}
             return resp
         return {"ok": False, "refused": False, "error": f"unknown tool {tool!r}"}
     except REFUSALS as exc:

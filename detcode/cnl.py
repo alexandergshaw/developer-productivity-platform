@@ -52,6 +52,7 @@ GRAMMAR = (
     "write a function <name> where <name>(args) == value [and ...]",
     "generate tests for <func> where <func>(args) == value [and ...]",
     "build a <project direction>  (e.g. build a resume tailorer)",
+    "plan a <project direction>  (spec interview for unknown domains)",
 )
 
 
@@ -176,6 +177,10 @@ _PATTERNS = (
             {"function": m["func"], "examples": _conditions(m["cond"], m["func"])},
         ),
     ),
+    (
+        re.compile(r"^plan\s+(?:a|an)\s+(?P<direction>.+)$", re.IGNORECASE),
+        lambda m: Intent.of("plan", direction=m["direction"]),
+    ),
     # Project building. Requires "a/an" so vague commands ("make it faster")
     # still refuse instead of scaffolding a mystery project. Tried last:
     # "write/make a function ..." forms are matched (or rewritten) above.
@@ -215,7 +220,7 @@ _REWRITES = (
 
 _CHAIN_VERBS = frozenset(
     "write make create build craft fix repair debug correct remove delete drop "
-    "strip rename explain describe summarize document add generate sort clean tidy".split()
+    "strip rename explain describe summarize document add generate sort clean tidy plan".split()
 )
 
 

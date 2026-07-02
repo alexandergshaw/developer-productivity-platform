@@ -270,6 +270,214 @@ def build(direction: str, name: str | None = None, web: bool = False) -> Project
     return Project(slug, plan["title"], tuple(files), report)
 
 
+_PLAN_CLI = '''
+"""Command-line interface: __PKG__ call <function> [args...]"""
+import argparse
+import ast
+
+from . import core
+
+
+def _parse_arg(text):
+    """Python literal when possible, raw string otherwise (fixed rule)."""
+    try:
+        return ast.literal_eval(text)
+    except (ValueError, SyntaxError):
+        return text
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="__PKG__")
+    sub = parser.add_subparsers(dest="command", required=True)
+    call = sub.add_parser("call", help="call a core function with literal arguments")
+    call.add_argument("function", help="function name in core.py")
+    call.add_argument("args", nargs="*", help="arguments as Python literals")
+    return parser
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    fn = getattr(core, args.function, None)
+    if not callable(fn):
+        print(f"no such function: {args.function}")
+        return 2
+    print(repr(fn(*[_parse_arg(a) for a in args.args])))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+_PLAN_MAIN = '"""Enables python -m __PKG__."""\nfrom .cli import main\n\nif __name__ == "__main__":\n    raise SystemExit(main())\n'
+
+
+def _validate_plan(plan: dict) -> tuple[str, list[dict]]:
+    if not isinstance(plan, dict) or plan.get("detcode_plan") != 1:
+        raise BuildError('not a detcode plan (expected {"detcode_plan": 1, ...})')
+    slug = plan.get("name")
+    if not isinstance(slug, str) or not slug.isidentifier():
+        raise BuildError(f"plan name {slug!r} is not a valid identifier")
+    functions = plan.get("functions")
+    if not isinstance(functions, list) or not functions:
+        raise BuildError("plan has no functions")
+    seen: set[str] = set()
+    for fn in functions:
+        fname = fn.get("name") if isinstance(fn, dict) else None
+        if not isinstance(fname, str) or not fname.isidentifier():
+            raise BuildError(f"plan function name {fname!r} is not a valid identifier")
+        if fname in seen:
+            raise BuildError(f"duplicate plan function {fname!r}")
+        seen.add(fname)
+        if not isinstance(fn.get("examples", []), list):
+            raise BuildError(f"examples of {fname!r} must be a list")
+    return slug, functions
+
+
+def _stub(fname: str, description: str, examples: list) -> str:
+    n = len(examples[0]["in"]) if examples and isinstance(examples[0], dict) else None
+    params = "*args" if n is None else ("x" if n == 1 else ", ".join(f"x{i}" for i in range(n)))
+    desc = description or "planned function"
+    return (
+        f"def {fname}({params}):\n"
+        f'    """{desc} (stub: not derivable from the given examples yet)."""\n'
+        f"    raise NotImplementedError(\n"
+        f'        "implement {fname}, then: detcode teach --file core.py --func {fname}"\n'
+        f"    )\n"
+    )
+
+
+def build_from_plan(plan: dict, web: bool = False, corpus: tuple = ()) -> Project:
+    """Build a project from a filled plan file.
+
+    Each planned function is attempted via retrieval then synthesis from its
+    examples. Derived functions become real code with passing tests; the rest
+    become stubs whose examples ship as expectedFailure tests — executable
+    TODOs that flip loudly once implemented.
+    """
+    from . import retrieve as retrieve_engine
+    from .retrieve import NoMatch
+    from .synth import NoSolution, SpecError
+
+    slug, functions = _validate_plan(plan)
+    direction = str(plan.get("direction") or slug)
+    solved: list[tuple[str, str, list]] = []
+    unsolved: list[tuple[str, str, list]] = []
+    for fn in functions:
+        fname = fn["name"]
+        examples = fn.get("examples") or []
+        description = str(fn.get("description") or "")
+        if examples:
+            spec = {"name": fname, "examples": examples}
+            # Optional per-function search bounds ride along from the plan.
+            for key in ("max_depth", "budget"):
+                if key in fn:
+                    spec[key] = fn[key]
+            try:
+                r = retrieve_engine.write_function(spec, extra=corpus)
+                solved.append((fname, r.source, examples))
+                continue
+            except (NoMatch, NoSolution, SpecError):
+                pass
+        unsolved.append((fname, description, examples))
+
+    decisions = [
+        f'built from a plan for "{direction}" — examples are the spec',
+        f"{len(solved)} of {len(functions)} function(s) derived from their examples "
+        "(retrieval/synthesis); "
+        + (
+            f"{len(unsolved)} left as stub(s) with their examples as expectedFailure "
+            "tests — implement them, watch the tests flip, then `detcode teach`"
+            if unsolved
+            else "nothing left to implement"
+        ),
+        f"package name {slug!r} from the plan",
+        f"interface: command-line (python -m {slug} call <function> [args...])",
+        "test suite included; run: python -m unittest discover -s tests",
+    ]
+
+    core_parts = [f'"""Core logic for {slug} (built from a detcode plan)."""']
+    core_parts.extend(source.rstrip("\n") for _, source, _ in solved)
+    core_parts.extend(_stub(f, d, ex).rstrip("\n") for f, d, ex in unsolved)
+    core_py = "\n\n\n".join(core_parts) + "\n"
+
+    test_lines = [
+        f'"""Tests for {slug}. expectedFailure = planned intent, not yet implemented."""',
+        "import unittest",
+        "",
+        f"from {slug} import core",
+        "",
+        "",
+        "class CoreTests(unittest.TestCase):",
+    ]
+    for fname, _source, examples in solved:
+        for i, ex in enumerate(examples):
+            args = ", ".join(repr(a) for a in ex["in"])
+            test_lines.append(f"    def test_{fname}_{i}(self):")
+            test_lines.append(f"        self.assertEqual(core.{fname}({args}), {ex['out']!r})")
+            test_lines.append("")
+    for fname, _desc, examples in unsolved:
+        for i, ex in enumerate(examples):
+            args = ", ".join(repr(a) for a in ex.get("in", []))
+            test_lines.append("    @unittest.expectedFailure")
+            test_lines.append(f"    def test_{fname}_intent_{i}(self):")
+            test_lines.append(f"        self.assertEqual(core.{fname}({args}), {ex['out']!r})")
+            test_lines.append("")
+        if not examples:
+            test_lines.append("    @unittest.expectedFailure")
+            test_lines.append(f"    def test_{fname}_intent(self):")
+            test_lines.append(f"        core.{fname}()")
+            test_lines.append("")
+    test_lines.extend(['', 'if __name__ == "__main__":', "    unittest.main()"])
+    tests_py = "\n".join(test_lines) + "\n"
+
+    readme_plan = {
+        "direction": direction,
+        "slug": slug,
+        "title": _title(slug),
+        "decisions": decisions,
+        "pack_slugs": [(None, slug)],
+        "web": web,
+    }
+    merged = {
+        f"{slug}/__init__.py": f'"""{slug} (generated by detcode from a plan)."""\n',
+        f"{slug}/core.py": core_py,
+        f"{slug}/cli.py": _PLAN_CLI.lstrip("\n").replace("__PKG__", slug),
+        f"{slug}/__main__.py": _PLAN_MAIN.replace("__PKG__", slug),
+        "tests/__init__.py": "",
+        f"tests/test_{slug}.py": tests_py,
+        "README.md": _readme(readme_plan),
+        "pyproject.toml": _pyproject(readme_plan),
+        ".gitignore": "__pycache__/\n*.py[cod]\n*.egg-info/\n",
+    }
+    if web:
+        from ..packs import webwrap
+
+        for raw_path, raw_content in webwrap.files().items():
+            merged[raw_path.replace("__PKG__", slug)] = raw_content.replace("__PKG__", slug)
+
+    for path, content in merged.items():
+        if path.endswith(".py"):
+            ast.parse(content)
+
+    files = tuple(sorted((ProjectFile(p, c) for p, c in merged.items()), key=lambda f: f.path))
+    report = provenance(
+        "build",
+        RULE_VERSION,
+        origin="plan",
+        pack="plan",
+        packs=["plan"],
+        package=slug,
+        packages=[slug],
+        web=web,
+        solved=[f for f, _, _ in solved],
+        unsolved=[f for f, _, _ in unsolved],
+        decisions=decisions,
+        files=[f.path for f in files],
+    )
+    return Project(slug, _title(slug), files, report)
+
+
 def render(project: Project) -> str:
     """Flatten a project to a single readable text bundle (for previews)."""
     parts = [f"# Project: {project.name} — {len(project.files)} files"]

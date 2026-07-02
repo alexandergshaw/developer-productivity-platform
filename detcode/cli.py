@@ -21,6 +21,7 @@ from .engines import (
     document,
     explain,
     gentest,
+    plan as plan_engine,
     repair,
     retrieve,
     rewrite,
@@ -149,8 +150,30 @@ def _cmd_gentest(args) -> int:
     return 0
 
 
+def _cmd_plan(args) -> int:
+    result = plan_engine.make_plan(args.direction, name=args.name)
+    print(result.questions, file=sys.stderr)
+    out = args.out or result.report["plan_file"]
+    if args.stdout:
+        sys.stdout.write(result.plan_text)
+    else:
+        if os.path.exists(out):
+            raise builder.BuildError(f"{out} already exists; refusing to overwrite")
+        _write(out, result.plan_text)
+        print(f"\nplan written to {out} — fill the examples, then:", file=sys.stderr)
+        print(f"  detcode new --plan {out}", file=sys.stderr)
+    return 0
+
+
 def _cmd_new(args) -> int:
-    project = builder.build(args.direction, name=args.name, web=args.web)
+    if args.plan:
+        if args.direction:
+            raise builder.BuildError("give a direction OR --plan, not both")
+        project = builder.build_from_plan(json.loads(_read(args.plan)), web=args.web)
+    elif args.direction:
+        project = builder.build(args.direction, name=args.name, web=args.web)
+    else:
+        raise builder.BuildError('give a direction (detcode new "...") or --plan file.json')
     if args.dry_run:
         print(f"project: {project.name} ({len(project.files)} files)")
         print("decisions:")
@@ -270,10 +293,22 @@ def build_parser() -> argparse.ArgumentParser:
     gt.add_argument("--out", help="write the test module to this path (default: stdout)")
     gt.set_defaults(handler=_cmd_gentest)
 
+    pl = sub.add_parser(
+        "plan", help="spec interview for a direction detcode cannot build yet"
+    )
+    pl.add_argument("direction", help='e.g. "a citation formatter"')
+    pl.add_argument("--name", help="override the derived package name")
+    pl.add_argument("--out", help="plan file path (default: <name>.plan.json)")
+    pl.add_argument("--stdout", action="store_true", help="print the plan instead of writing it")
+    pl.set_defaults(handler=_cmd_plan)
+
     nw = sub.add_parser(
         "new", help='generate a project from a general direction, e.g. "resume tailorer"'
     )
-    nw.add_argument("direction", help='e.g. "resume tailorer" or "teaching assistant app"')
+    nw.add_argument(
+        "direction", nargs="?", help='e.g. "resume tailorer" or "teaching assistant app"'
+    )
+    nw.add_argument("--plan", help="build from a filled plan file instead of a direction")
     nw.add_argument("--out", help="target directory (default: the derived package name)")
     nw.add_argument("--name", help="override the derived package name")
     nw.add_argument(

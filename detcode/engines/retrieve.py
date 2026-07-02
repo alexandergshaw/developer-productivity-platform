@@ -315,15 +315,21 @@ def _passes(source: str, func_name: str, examples: list[dict]) -> bool:
     return True
 
 
-def retrieve(spec: dict) -> Result:
-    """Return a corpus entry verified against every example, or refuse."""
+def retrieve(spec: dict, extra: tuple[Entry, ...] = ()) -> Result:
+    """Return a corpus entry verified against every example, or refuse.
+
+    ``extra`` holds user-taught entries; they are tried after the built-in
+    corpus (name matches still jump the queue across both).
+    """
     name, examples, arity = _validate(spec)
 
+    candidates = tuple(CORPUS) + tuple(extra)
     # Entries whose canonical name matches the request are tried first.
     ordered = sorted(
-        enumerate(CORPUS), key=lambda pair: (0 if pair[1].name == name else 1, pair[0])
+        enumerate(candidates), key=lambda pair: (0 if pair[1].name == name else 1, pair[0])
     )
-    for _, entry in ordered:
+    builtin_count = len(CORPUS)
+    for index, entry in ordered:
         if entry.arity != arity:
             continue
         if not _passes(entry.source, entry.name, examples):
@@ -338,6 +344,7 @@ def retrieve(spec: dict) -> Result:
             RULE_VERSION,
             entry=entry.name,
             renamed_to=name,
+            origin="builtin" if index < builtin_count else "user",
             cases_verified=len(examples),
         )
         return Result(source, report)
@@ -345,7 +352,7 @@ def retrieve(spec: dict) -> Result:
     raise NoMatch("no corpus entry is consistent with the examples")
 
 
-def write_function(spec: dict) -> Result:
+def write_function(spec: dict, extra: tuple[Entry, ...] = ()) -> Result:
     """The combined "write me a function" capability.
 
     Retrieval first (cheap, and covers loops/recursion the synthesizer cannot
@@ -353,7 +360,7 @@ def write_function(spec: dict) -> Result:
     verify against every example, and provenance records which engine won.
     """
     try:
-        return retrieve(spec)
+        return retrieve(spec, extra)
     except NoMatch:
         r = synth_engine.synthesize(spec)
         return Result(r.source, r.report)

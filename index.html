@@ -6,6 +6,7 @@
 <title>detcode</title>
 <style>
   :root {
+    --sbw: 300px; --ph: 240px;
     --tb-bg: #3c3c3c; --tb-fg: #cccccc;
     --ab-bg: #333333; --ab-fg: #858585; --ab-active: #ffffff;
     --sb-bg: #252526; --sb-fg: #cccccc; --sb-head: #bbbbbb; --sb-sect: #cccccc;
@@ -13,8 +14,8 @@
     --tab-bg: #2d2d2d; --tab-active: #1e1e1e; --tab-fg: #969696; --tab-active-fg: #ffffff;
     --panel-bg: #1e1e1e; --term-fg: #cccccc;
     --status-bg: #007acc; --status-fg: #ffffff;
-    --border: #3c3c3c; --panel-border: #80808059;
-    --hover: #2a2d2e; --select: #37373d; --focus: #04395e; --list-active: #094771;
+    --border: #3c3c3c; --panel-border: #80808059; --sash: #0078d4;
+    --hover: #2a2d2e; --select: #37373d; --list-active: #094771;
     --accent: #0e639c; --accent-hover: #1177bb;
     --red: #f48771; --green: #89d185; --yellow: #cca700; --blue: #75beff;
     --kw: #569cd6; --str: #ce9178; --com: #6a9955; --num: #b5cea8;
@@ -26,18 +27,26 @@
   html, body { height: 100%; overflow: hidden; }
   body {
     display: grid; font-family: var(--ui); font-size: 13px; color: var(--ed-fg);
-    grid-template-columns: 48px 300px 1fr;
-    grid-template-rows: 30px 1fr 240px 22px;
-    grid-template-areas: "menu menu menu" "ab sidebar main" "ab sidebar panel" "status status status";
+    grid-template-columns: 48px var(--sbw) 4px 1fr;
+    grid-template-rows: 30px 1fr 4px var(--ph) 22px;
+    grid-template-areas:
+      "menu menu menu menu"
+      "ab sidebar vsash main"
+      "ab sidebar vsash hsash"
+      "ab sidebar vsash panel"
+      "status status status status";
     background: var(--ed-bg);
   }
-  body.panel-hidden { grid-template-rows: 30px 1fr 0 22px; }
-  body.panel-hidden #panel { display: none; }
+  body.panel-hidden { grid-template-rows: 30px 1fr 0 0 22px; }
+  body.panel-hidden #panel, body.panel-hidden #hsash { display: none; }
+  body.resizing { user-select: none; cursor: inherit; }
+  #vsash { grid-area: vsash; cursor: col-resize; background: transparent; transition: background .15s .2s; z-index: 30; }
+  #hsash { grid-area: hsash; cursor: row-resize; background: transparent; transition: background .15s .2s; z-index: 30; }
+  #vsash:hover, #vsash.dragging, #hsash:hover, #hsash.dragging { background: var(--sash); }
   ::-webkit-scrollbar { width: 14px; height: 14px; }
   ::-webkit-scrollbar-thumb { background: #79797966; }
   ::-webkit-scrollbar-thumb:hover { background: #797979b3; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
 
   /* ---------- title / menu bar ---------- */
   #menubar {
@@ -89,7 +98,7 @@
   /* ---------- sidebar ---------- */
   #sidebar { grid-area: sidebar; background: var(--sb-bg); color: var(--sb-fg); overflow-y: auto; overflow-x: hidden; }
   .sb-title {
-    padding: 8px 20px 8px 20px; font-size: 11px; letter-spacing: .4px; color: var(--sb-head);
+    padding: 8px 20px; font-size: 11px; letter-spacing: .4px; color: var(--sb-head);
     display: flex; align-items: center; text-transform: uppercase;
   }
   .sb-sect {
@@ -118,8 +127,6 @@
     border: 1px solid transparent; padding: 4px 8px; font-size: 13px; outline: none;
   }
   .sb-input:focus { border-color: #007fd4; }
-
-  /* tree */
   #tree { user-select: none; }
   .node { display: flex; align-items: center; height: 22px; padding-right: 8px; cursor: pointer; white-space: nowrap; font-size: 13px; }
   .node:hover { background: var(--hover); }
@@ -129,16 +136,30 @@
   .node .fico { width: 16px; height: 16px; flex: none; margin-right: 5px; }
   .node.dirty .name::after { content: " ●"; color: var(--yellow); font-size: 10px; }
 
-  /* ---------- editor area ---------- */
-  #main { grid-area: main; display: flex; flex-direction: column; min-width: 0; background: var(--ed-bg); }
-  #tabs { display: flex; background: var(--sb-bg); overflow-x: auto; flex: none; height: 35px; }
-  #tabs::-webkit-scrollbar { height: 3px; }
+  /* ---------- editor groups ---------- */
+  #main { grid-area: main; display: flex; min-width: 0; min-height: 0; background: var(--ed-bg); }
+  .group { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .group + .group { border-left: 1px solid var(--panel-border); }
+  .gtabs { display: flex; background: var(--sb-bg); overflow-x: auto; flex: none; height: 35px; }
+  .gtabs::-webkit-scrollbar { height: 3px; }
+  .gactions { margin-left: auto; display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
+  .gactions .gact {
+    width: 26px; height: 26px; display: grid; place-items: center; color: #cccccc;
+    border-radius: 5px; cursor: pointer; opacity: .8;
+  }
+  .gactions .gact:hover { background: #ffffff1f; opacity: 1; }
+  .gactions svg { width: 16px; height: 16px; }
   .tab {
     display: flex; align-items: center; gap: 5px; padding: 0 10px; font-size: 13px;
     color: var(--tab-fg); background: var(--tab-bg); border-right: 1px solid #252526;
     cursor: pointer; white-space: nowrap; height: 35px;
   }
-  .tab.on { background: var(--tab-active); color: var(--tab-active-fg); }
+  .tab.on { background: var(--tab-active); }
+  .group.focused .tab.on { color: var(--tab-active-fg); }
+  .group:not(.focused) .tab.on { color: #ffffff99; }
+  .tab.drop-before { box-shadow: inset 2px 0 0 var(--sash); }
+  .tab.drop-after { box-shadow: inset -2px 0 0 var(--sash); }
+  .gtabs.drop-into { box-shadow: inset 0 0 0 2px var(--sash); }
   .tab .fico { width: 16px; height: 16px; }
   .tab .x {
     border: none; background: none; color: inherit; cursor: pointer; font-size: 13px;
@@ -148,59 +169,59 @@
   .tab:hover .x, .tab.on .x { visibility: visible; }
   .tab .x:hover { background: #ffffff1f; }
   .tab .dot { color: var(--tab-active-fg); font-size: 15px; width: 20px; text-align: center; }
-  #breadcrumbs {
+  .gbc {
     display: flex; align-items: center; gap: 3px; height: 22px; padding: 0 16px; flex: none;
     font-size: 12px; color: #a9a9a9; background: var(--ed-bg); white-space: nowrap; overflow: hidden;
   }
-  #breadcrumbs .crumb:hover { color: #e7e7e7; }
-  #breadcrumbs .chev { color: #6a6a6a; font-size: 10px; }
-  #editor { flex: 1; overflow: hidden; font-family: var(--mono); font-size: 14px; line-height: 19px; position: relative; }
-  #edwrap { display: flex; height: 100%; }
-  #gutter {
+  .gbc .crumb:hover { color: #e7e7e7; }
+  .gbc .chev { color: #6a6a6a; font-size: 10px; }
+  .ged { flex: 1; overflow: hidden; font-family: var(--mono); font-size: 14px; line-height: 19px; position: relative; min-height: 0; }
+  .edwrap { display: flex; height: 100%; }
+  .gutter {
     flex: none; width: 62px; padding: 4px 20px 4px 0; text-align: right;
     color: var(--gutter); overflow: hidden; user-select: none; white-space: pre; font-size: 13px;
   }
-  #gutter .cur { color: var(--gutter-active); }
-  #edstack { position: relative; flex: 1; overflow: hidden; }
-  #curline { position: absolute; left: 0; right: 0; height: 19px; background: #ffffff0d; pointer-events: none; z-index: 0; }
-  #hl, #edta {
+  .gutter .cur { color: var(--gutter-active); }
+  .edstack { position: relative; flex: 1; overflow: hidden; }
+  .curline { position: absolute; left: 0; right: 0; height: 19px; background: #ffffff0d; pointer-events: none; z-index: 0; }
+  .hl, .edta {
     position: absolute; inset: 0; margin: 0; padding: 4px 8px; border: 0;
     font: inherit; line-height: 19px; white-space: pre; overflow: auto;
     tab-size: 4; box-sizing: border-box;
   }
-  #hl { pointer-events: none; overflow: hidden; color: var(--ed-fg); z-index: 1; }
-  #edta {
+  .hl { pointer-events: none; overflow: hidden; color: var(--ed-fg); z-index: 1; }
+  .edta {
     background: transparent; color: transparent; caret-color: #aeafad;
     resize: none; outline: none; z-index: 2; word-wrap: normal;
   }
-  #edta::selection { background: #264f78; color: transparent; }
-  #minimap { flex: none; width: 92px; position: relative; background: var(--ed-bg); cursor: pointer; border-left: 1px solid #ffffff0a; }
-  #minimap canvas { display: block; }
-  #minimap .view { position: absolute; left: 0; right: 0; background: #ffffff12; pointer-events: none; }
+  .edta::selection { background: #264f78; color: transparent; }
+  .minimap { flex: none; width: 92px; position: relative; background: var(--ed-bg); cursor: pointer; border-left: 1px solid #ffffff0a; }
+  .minimap canvas { display: block; }
+  .minimap .view { position: absolute; left: 0; right: 0; background: #ffffff12; pointer-events: none; }
   .k { color: var(--kw); } .s { color: var(--str); } .c { color: var(--com); }
   .n { color: var(--num); } .f { color: var(--fn); } .d { color: var(--dec); } .t { color: var(--cls); }
-  #welcome { padding: 60px 0 0; color: #9a9a9a; font-size: 13px; text-align: center; height: 100%; }
-  #welcome .biglogo { font-size: 120px; color: #ffffff0f; line-height: 1; user-select: none; }
-  #welcome table { margin: 30px auto 0; border-spacing: 6px 8px; }
-  #welcome td:first-child { text-align: right; color: #cccccc99; padding-right: 8px; }
-  #welcome .kbd {
+  .welcome { padding: 60px 0 0; color: #9a9a9a; font-size: 13px; text-align: center; height: 100%; font-family: var(--ui); }
+  .welcome .biglogo { font-size: 120px; color: #ffffff0f; line-height: 1; user-select: none; }
+  .welcome table { margin: 30px auto 0; border-spacing: 6px 8px; }
+  .welcome td:first-child { text-align: right; color: #cccccc99; padding-right: 8px; }
+  .welcome .kbd {
     background: #8080802b; border-radius: 3px; padding: 2px 6px; font-size: 11px;
     color: #c5c5c5; border-bottom: 1px solid #00000059; margin: 0 2px;
   }
-  #suggest {
+  .suggest {
     position: absolute; z-index: 20; min-width: 280px; max-width: 480px;
     background: #252526; border: 1px solid #454545; box-shadow: 0 4px 10px #000a;
     font-size: 12.5px; font-family: var(--ui);
   }
-  #suggest .sug { display: flex; gap: 8px; padding: 3px 10px; cursor: pointer; white-space: nowrap; align-items: center; }
-  #suggest .sug.on { background: var(--list-active); }
-  #suggest .kind { color: #8a8a8a; width: 64px; flex: none; font-size: 11px; }
-  #suggest .kind.corpus { color: var(--green); }
-  #suggest .label { font-family: var(--mono); font-size: 12.5px; }
-  #suggest .detail { color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; margin-left: auto; padding-left: 14px; }
+  .suggest .sug { display: flex; gap: 8px; padding: 3px 10px; cursor: pointer; white-space: nowrap; align-items: center; }
+  .suggest .sug.on { background: var(--list-active); }
+  .suggest .kind { color: #8a8a8a; width: 64px; flex: none; font-size: 11px; }
+  .suggest .kind.corpus { color: var(--green); }
+  .suggest .label { font-family: var(--mono); font-size: 12.5px; }
+  .suggest .detail { color: #8a8a8a; overflow: hidden; text-overflow: ellipsis; margin-left: auto; padding-left: 14px; }
 
   /* ---------- bottom panel ---------- */
-  #panel { grid-area: panel; background: var(--panel-bg); border-top: 1px solid var(--panel-border); display: flex; flex-direction: column; }
+  #panel { grid-area: panel; background: var(--panel-bg); border-top: 1px solid var(--panel-border); display: flex; flex-direction: column; min-height: 0; }
   #panel-tabs { display: flex; align-items: center; gap: 14px; padding: 4px 14px 0; flex: none; font-size: 11px; letter-spacing: .4px; color: #9d9d9d; user-select: none; }
   #panel-tabs .ptab { cursor: pointer; padding-bottom: 5px; border-bottom: 1px solid transparent; text-transform: uppercase; }
   #panel-tabs .ptab.on { color: #e7e7e7; border-bottom-color: #e7e7e7; }
@@ -304,32 +325,27 @@
         <input type="file" id="folder-input" webkitdirectory multiple hidden>
       </div>
     </div>
-
     <div id="view-search" hidden>
       <div class="sb-title">Search</div>
       <input class="sb-input" id="search-input" placeholder="Search" autocomplete="off">
       <div id="search-results"></div>
     </div>
-
     <div id="view-scm" hidden>
       <div class="sb-title">Source Control</div>
       <div class="sb-sect"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M6 4l4 4-4 4z"/></svg>Changes</div>
       <div id="scm-changes"><div class="sb-note">No modified buffers. Engine and manual edits appear here; save with Ctrl+S.</div></div>
     </div>
-
     <div id="view-debug" hidden>
       <div class="sb-title">Run and Debug</div>
       <div class="sb-note">Run the workspace test suite server-side (deterministic, hermetic).</div>
       <button class="sb-btn" id="run-tests">Run Tests</button>
       <div class="sb-note" id="debug-result"></div>
     </div>
-
     <div id="view-ext" hidden>
       <div class="sb-title">Extensions: Packs</div>
       <div class="sb-note">Domain packs install like extensions — matched by keywords in your direction.</div>
       <div id="ext-list"></div>
     </div>
-
     <div id="view-detcode" hidden>
       <div class="sb-title">detcode Engine</div>
       <div class="sb-note">Quick commands — click to place in the terminal, Enter to run. Commands act on the active editor file.</div>
@@ -348,11 +364,9 @@
     </div>
   </aside>
 
-  <main id="main">
-    <div id="tabs" role="tablist"></div>
-    <div id="breadcrumbs" hidden></div>
-    <div id="editor"></div>
-  </main>
+  <div id="vsash" title="Resize side bar"></div>
+  <main id="main"></main>
+  <div id="hsash" title="Resize panel"></div>
 
   <section id="panel" aria-label="Panel">
     <div id="panel-tabs">
@@ -397,18 +411,21 @@
 <script>
 "use strict";
 // ---------- state ----------
-const files = new Map();   // path -> { content, dirty, generated }
-let tabs = [];             // open paths
-let active = null;
+const files = new Map();          // path -> { content, dirty, generated }
+let groups = [{ tabs: [], active: null }];   // editor groups (max 2)
+let activeGroup = 0;
+let active = null;                // mirror of groups[activeGroup].active
 const collapsed = new Set();
 let history = [], hIdx = 0;
 let folderName = null;
 const fileHandles = new Map();
 
 const $ = id => document.getElementById(id);
+const E = (name, gi = activeGroup) => $(name + gi);   // group-scoped element
 const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function syncActive() { active = groups[activeGroup] ? groups[activeGroup].active : null; }
 
-// ---------- file icons (seti-style tints) ----------
+// ---------- file icons ----------
 const ICON_COLORS = { py: "#519aba", md: "#519aba", json: "#cbcb41", js: "#cbcb41",
   ts: "#519aba", tsx: "#519aba", jsx: "#cbcb41", html: "#e37933", css: "#519aba",
   yml: "#a074c4", yaml: "#a074c4", toml: "#6d8086", cfg: "#6d8086", txt: "#6d8086",
@@ -423,6 +440,7 @@ const FOLDER_ICON = `<svg class="fico" viewBox="0 0 16 16" fill="none" stroke="#
   <path d="M1.5 3.5h4.5l1.5 2h7v7h-13z"/></svg>`;
 const CHEV_RIGHT = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M6 4l4 4-4 4z"/></svg>';
 const CHEV_DOWN = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4z"/></svg>';
+const SPLIT_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="2.5" width="13" height="11"/><path d="M8 2.5v11"/></svg>';
 
 // ---------- python highlighter ----------
 const PY_KW = new Set(("def class return if elif else for while import from as with try except finally raise " +
@@ -474,92 +492,235 @@ function highlightPython(text) {
   return out;
 }
 
-// ---------- editor ----------
+// ---------- editor groups ----------
 const LANG_NAMES = { py: "Python", md: "Markdown", json: "JSON", js: "JavaScript",
   ts: "TypeScript", html: "HTML", css: "CSS", yml: "YAML", yaml: "YAML", toml: "TOML", txt: "Plain Text" };
 
-function renderEditor() {
-  const ed = $("editor");
-  const bc = $("breadcrumbs");
-  if (!active || !files.has(active)) {
+function renderGroups() {
+  syncActive();
+  $("main").innerHTML = groups.map((_g, gi) => `
+    <div class="group ${gi === activeGroup ? "focused" : ""}" data-g="${gi}">
+      <div class="gtabs" id="tabs${gi}" data-g="${gi}"></div>
+      <div class="gbc" id="breadcrumbs${gi}" hidden></div>
+      <div class="ged" id="editor${gi}"></div>
+    </div>`).join("");
+  groups.forEach((_g, gi) => { renderTabsFor(gi); renderEditorFor(gi); });
+  wireGroupEvents();
+}
+
+function wireGroupEvents() {
+  document.querySelectorAll(".group").forEach(groupEl => {
+    const gi = Number(groupEl.dataset.g);
+    groupEl.addEventListener("mousedown", () => focusGroup(gi));
+    const strip = $(`tabs${gi}`);
+    strip.addEventListener("click", e => {
+      const act = e.target.closest("[data-gact]");
+      if (act) { runGroupAction(act.dataset.gact, gi); e.stopPropagation(); return; }
+      const x = e.target.closest("[data-x]");
+      if (x) { closeTab(x.dataset.x, gi); e.stopPropagation(); return; }
+      const t = e.target.closest("[data-p]");
+      if (t) openFile(t.dataset.p, gi);
+    });
+    strip.addEventListener("auxclick", e => {
+      const t = e.target.closest("[data-p]");
+      if (t && e.button === 1) closeTab(t.dataset.p, gi);
+    });
+    // drag & drop
+    strip.addEventListener("dragover", e => {
+      e.preventDefault();
+      const tab = e.target.closest(".tab[data-p]");
+      strip.classList.toggle("drop-into", !tab);
+      document.querySelectorAll(".tab").forEach(el => el.classList.remove("drop-before", "drop-after"));
+      if (tab) {
+        const rect = tab.getBoundingClientRect();
+        tab.classList.add(e.clientX < rect.left + rect.width / 2 ? "drop-before" : "drop-after");
+      }
+    });
+    strip.addEventListener("dragleave", () => {
+      strip.classList.remove("drop-into");
+      document.querySelectorAll(".tab").forEach(el => el.classList.remove("drop-before", "drop-after"));
+    });
+    strip.addEventListener("drop", e => {
+      e.preventDefault();
+      strip.classList.remove("drop-into");
+      let payload;
+      try { payload = JSON.parse(e.dataTransfer.getData("application/x-detcode-tab")); }
+      catch { return; }
+      const tab = e.target.closest(".tab[data-p]");
+      let index = groups[gi].tabs.length;
+      if (tab) {
+        const rect = tab.getBoundingClientRect();
+        index = groups[gi].tabs.indexOf(tab.dataset.p) + (e.clientX < rect.left + rect.width / 2 ? 0 : 1);
+      }
+      document.querySelectorAll(".tab").forEach(el => el.classList.remove("drop-before", "drop-after"));
+      moveTab(payload.path, payload.from, gi, index);
+    });
+  });
+}
+
+function moveTab(path, fromG, toG, index) {
+  const src = groups[fromG], dst = groups[toG];
+  if (!src || !dst || !files.has(path)) return;
+  const oldIndex = src.tabs.indexOf(path);
+  if (oldIndex === -1) return;
+  if (fromG === toG && (index === oldIndex || index === oldIndex + 1)) return;
+  src.tabs.splice(oldIndex, 1);
+  if (fromG === toG && index > oldIndex) index--;
+  if (!dst.tabs.includes(path)) dst.tabs.splice(Math.max(0, Math.min(index, dst.tabs.length)), 0, path);
+  dst.active = path;
+  if (src !== dst && src.active === path) src.active = src.tabs[src.tabs.length - 1] || null;
+  // collapse an emptied second group
+  if (groups.length > 1 && groups[1].tabs.length === 0) { groups.splice(1, 1); activeGroup = 0; }
+  else activeGroup = Math.min(toG, groups.length - 1);
+  syncActive();
+  renderGroups(); renderTree();
+}
+
+function splitEditor() {
+  if (groups.length >= 2 || !active) return;
+  groups.push({ tabs: [active], active });
+  activeGroup = 1;
+  syncActive();
+  renderGroups(); renderTree();
+}
+
+function runGroupAction(action, gi) {
+  if (action === "split") { focusGroup(gi); splitEditor(); }
+  if (action === "closegroup") {
+    groups.splice(gi, 1);
+    if (!groups.length) groups = [{ tabs: [], active: null }];
+    activeGroup = 0;
+    syncActive();
+    renderGroups(); renderTree();
+  }
+}
+
+function focusGroup(gi) {
+  if (gi === activeGroup || !groups[gi]) return;
+  activeGroup = gi;
+  syncActive();
+  document.querySelectorAll(".group").forEach(el =>
+    el.classList.toggle("focused", Number(el.dataset.g) === activeGroup));
+  updateStatusForActive();
+  renderTeachList(); renderTree(); scheduleDiagnostics();
+}
+
+function renderTabsFor(gi) {
+  const g = groups[gi];
+  const actions = `<div class="gactions">
+      ${groups.length < 2 ? `<span class="gact" data-gact="split" title="Split Editor (Ctrl+\\)">${SPLIT_ICON}</span>` : ""}
+      ${gi > 0 ? `<span class="gact" data-gact="closegroup" title="Close Group">✕</span>` : ""}
+    </div>`;
+  $(`tabs${gi}`).innerHTML = g.tabs.map(p => {
+    const name = p.split("/").pop();
+    const buffer = files.get(p);
+    const closer = buffer && buffer.dirty
+      ? '<span class="dot">●</span>'
+      : `<button class="x" data-x="${esc(p)}" title="Close">✕</button>`;
+    return `<div class="tab ${p === g.active ? "on" : ""}" data-p="${esc(p)}" draggable="true" role="tab">
+      ${fileIcon(name)}<span>${esc(name)}</span>${closer}</div>`;
+  }).join("") + actions;
+  $(`tabs${gi}`).querySelectorAll(".tab[data-p]").forEach(tab => {
+    tab.addEventListener("dragstart", e => {
+      e.dataTransfer.setData("application/x-detcode-tab", JSON.stringify({ path: tab.dataset.p, from: gi }));
+      e.dataTransfer.effectAllowed = "move";
+    });
+  });
+}
+
+function renderEditorFor(gi) {
+  const g = groups[gi];
+  const ed = $(`editor${gi}`);
+  const bc = $(`breadcrumbs${gi}`);
+  if (!g.active || !files.has(g.active)) {
     bc.hidden = true;
-    ed.innerHTML = `<div id="welcome">
+    ed.innerHTML = `<div class="welcome">
       <div class="biglogo">⟡</div>
       <table>
         <tr><td>Show All Commands</td><td><span class="kbd">Ctrl</span>+<span class="kbd">Shift</span>+<span class="kbd">P</span></td></tr>
         <tr><td>Go to File</td><td><span class="kbd">Ctrl</span>+<span class="kbd">P</span></td></tr>
         <tr><td>Open Folder</td><td><span class="kbd">Ctrl</span>+<span class="kbd">K</span> <span class="kbd">Ctrl</span>+<span class="kbd">O</span></td></tr>
+        <tr><td>Split Editor</td><td><span class="kbd">Ctrl</span>+<span class="kbd">\\</span></td></tr>
         <tr><td>Toggle Terminal</td><td><span class="kbd">Ctrl</span>+<span class="kbd">\`</span></td></tr>
-        <tr><td>Generate a Project</td><td><span style="font-family:var(--mono);font-size:12px">new "a resume tailorer"</span></td></tr>
       </table>
     </div>`;
-    $("st-pos").textContent = "Ln 1, Col 1";
-    $("st-lang").textContent = "Plain Text";
+    if (gi === activeGroup) updateStatusForActive();
     renderTeachList();
     return;
   }
   bc.hidden = false;
-  const parts = active.split("/");
+  const parts = g.active.split("/");
   bc.innerHTML = parts.map((part, i) =>
     `<span class="crumb">${i === parts.length - 1 ? fileIcon(part) + " " : ""}${esc(part)}</span>`
   ).join('<span class="chev">›</span>');
 
-  ed.innerHTML = `<div id="edwrap"><div id="gutter"></div><div id="edstack">
-    <div id="curline"></div><pre id="hl"></pre>
-    <textarea id="edta" spellcheck="false" autocomplete="off"></textarea>
-    <div id="suggest" hidden></div></div>
-    <div id="minimap"><canvas></canvas><div class="view"></div></div></div>`;
-  const ta = $("edta");
-  ta.value = files.get(active).content;
-  syncHl();
+  ed.innerHTML = `<div class="edwrap"><div class="gutter" id="gutter${gi}"></div><div class="edstack">
+    <div class="curline" id="curline${gi}"></div><pre class="hl" id="hl${gi}"></pre>
+    <textarea class="edta" id="edta${gi}" spellcheck="false" autocomplete="off"></textarea>
+    <div class="suggest" id="suggest${gi}" hidden></div></div>
+    <div class="minimap" id="minimap${gi}"><canvas></canvas><div class="view"></div></div></div>`;
+  const ta = $(`edta${gi}`);
+  ta.value = files.get(g.active).content;
+  syncHl(gi);
   ta.addEventListener("scroll", () => {
-    $("hl").scrollTop = ta.scrollTop; $("hl").scrollLeft = ta.scrollLeft;
-    $("gutter").scrollTop = ta.scrollTop;
-    updateCaretUI(); updateMinimapView();
+    $(`hl${gi}`).scrollTop = ta.scrollTop; $(`hl${gi}`).scrollLeft = ta.scrollLeft;
+    $(`gutter${gi}`).scrollTop = ta.scrollTop;
+    updateCaretUI(gi); updateMinimapView(gi);
   });
-  ta.addEventListener("input", onEdit);
-  ta.addEventListener("keydown", onEditorKey);
-  ta.addEventListener("click", updateCaretUI);
-  ta.addEventListener("keyup", updateCaretUI);
-  ta.addEventListener("blur", () => setTimeout(closeSuggest, 200));
-  const ext = (active.split(".").pop() || "").toLowerCase();
+  ta.addEventListener("focus", () => focusGroup(gi));
+  ta.addEventListener("input", () => onEdit(gi));
+  ta.addEventListener("keydown", e => onEditorKey(e, gi));
+  ta.addEventListener("click", () => updateCaretUI(gi));
+  ta.addEventListener("keyup", () => updateCaretUI(gi));
+  ta.addEventListener("blur", () => setTimeout(() => closeSuggest(gi), 200));
+  $(`minimap${gi}`).addEventListener("mousedown", e => minimapJump(e, gi));
+  if (gi === activeGroup) { updateStatusForActive(); renderTeachList(); scheduleDiagnostics(); }
+  updateCaretUI(gi);
+}
+
+function updateStatusForActive() {
+  const g = groups[activeGroup];
+  if (!g || !g.active) {
+    $("st-pos").textContent = "Ln 1, Col 1";
+    $("st-lang").textContent = "Plain Text";
+    return;
+  }
+  const ext = (g.active.split(".").pop() || "").toLowerCase();
   $("st-lang").textContent = LANG_NAMES[ext] || "Plain Text";
-  $("minimap").addEventListener("mousedown", minimapJump);
-  renderTeachList();
-  scheduleDiagnostics();
-  updateCaretUI();
+  updateCaretUI(activeGroup);
 }
 
-function syncHl() {
-  const ta = $("edta");
+function syncHl(gi) {
+  const ta = $(`edta${gi}`);
   if (!ta) return;
+  const path = groups[gi].active || "";
   const content = ta.value;
-  const lines = active && active.endsWith(".py")
-    ? highlightPython(content) : content.split("\n").map(esc);
-  $("hl").innerHTML = lines.join("\n") + "\n";
-  $("gutter").innerHTML = lines.map((_, i) => `<span data-ln="${i + 1}">${i + 1}</span>`).join("\n") + "\n";
-  renderMinimap(content);
-  updateCaretUI();
+  const lines = path.endsWith(".py") ? highlightPython(content) : content.split("\n").map(esc);
+  $(`hl${gi}`).innerHTML = lines.join("\n") + "\n";
+  $(`gutter${gi}`).innerHTML = lines.map((_, i) => `<span data-ln="${i + 1}">${i + 1}</span>`).join("\n") + "\n";
+  renderMinimap(gi, content);
+  updateCaretUI(gi);
 }
 
-function updateCaretUI() {
-  const ta = $("edta");
+function updateCaretUI(gi) {
+  const ta = $(`edta${gi}`);
   if (!ta) return;
   const upto = ta.value.slice(0, ta.selectionStart);
   const line = upto.split("\n").length;
   const col = upto.length - upto.lastIndexOf("\n");
-  $("st-pos").textContent = `Ln ${line}, Col ${col}`;
-  const cur = $("curline");
+  if (gi === activeGroup) $("st-pos").textContent = `Ln ${line}, Col ${col}`;
+  const cur = $(`curline${gi}`);
   if (cur) cur.style.top = `${4 + (line - 1) * 19 - ta.scrollTop}px`;
-  document.querySelectorAll("#gutter .cur").forEach(el => el.classList.remove("cur"));
-  const gl = document.querySelector(`#gutter [data-ln="${line}"]`);
+  const gutter = $(`gutter${gi}`);
+  gutter.querySelectorAll(".cur").forEach(el => el.classList.remove("cur"));
+  const gl = gutter.querySelector(`[data-ln="${line}"]`);
   if (gl) gl.classList.add("cur");
 }
 
-function renderMinimap(content) {
-  const canvas = document.querySelector("#minimap canvas");
+function renderMinimap(gi, content) {
+  const canvas = document.querySelector(`#minimap${gi} canvas`);
   if (!canvas) return;
-  const box = $("minimap").getBoundingClientRect();
+  const box = $(`minimap${gi}`).getBoundingClientRect();
   canvas.width = 92; canvas.height = Math.max(10, box.height);
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, 92, canvas.height);
@@ -571,15 +732,16 @@ function renderMinimap(content) {
     const trimmed = line.trimStart();
     if (!trimmed) return;
     const indent = (line.length - trimmed.length) * 0.9;
-    ctx.fillStyle = trimmed.startsWith("#") ? "#6a995566" : trimmed.startsWith("def ") || trimmed.startsWith("class ") ? "#dcdcaa66" : "#cccccc4d";
+    ctx.fillStyle = trimmed.startsWith("#") ? "#6a995566"
+      : trimmed.startsWith("def ") || trimmed.startsWith("class ") ? "#dcdcaa66" : "#cccccc4d";
     ctx.fillRect(2 + indent, y, Math.min(84, trimmed.length * 0.85), Math.max(1, step - 1));
   });
-  updateMinimapView();
+  updateMinimapView(gi);
 }
 
-function updateMinimapView() {
-  const ta = $("edta"), view = document.querySelector("#minimap .view");
-  const canvas = document.querySelector("#minimap canvas");
+function updateMinimapView(gi) {
+  const ta = $(`edta${gi}`), view = document.querySelector(`#minimap${gi} .view`);
+  const canvas = document.querySelector(`#minimap${gi} canvas`);
   if (!ta || !view || !canvas) return;
   const total = ta.scrollHeight, lines = ta.value.split("\n").length;
   const step = Math.min(3, Math.max(1, canvas.height / Math.max(1, lines)));
@@ -588,84 +750,89 @@ function updateMinimapView() {
   view.style.height = `${Math.max(14, (ta.clientHeight / total) * mapHeight)}px`;
 }
 
-function minimapJump(e) {
-  const ta = $("edta"), canvas = document.querySelector("#minimap canvas");
+function minimapJump(e, gi) {
+  const ta = $(`edta${gi}`), canvas = document.querySelector(`#minimap${gi} canvas`);
   if (!ta || !canvas) return;
+  focusGroup(gi);
   const rect = canvas.getBoundingClientRect();
   const lines = ta.value.split("\n").length;
   const step = Math.min(3, Math.max(1, canvas.height / Math.max(1, lines)));
-  const line = (e.clientY - rect.top) / step;
-  ta.scrollTop = Math.max(0, line * 19 - ta.clientHeight / 2);
+  ta.scrollTop = Math.max(0, ((e.clientY - rect.top) / step) * 19 - ta.clientHeight / 2);
 }
 
-function onEdit() {
-  const buffer = files.get(active);
-  const value = $("edta").value;
+function refreshMinimaps() {
+  groups.forEach((_g, gi) => {
+    const ta = $(`edta${gi}`);
+    if (ta) renderMinimap(gi, ta.value);
+  });
+}
+
+function onEdit(gi) {
+  const g = groups[gi];
+  const buffer = files.get(g.active);
+  const value = $(`edta${gi}`).value;
   if (buffer.content !== value) {
     buffer.content = value;
-    if (!buffer.dirty) { buffer.dirty = true; renderTabs(); renderTree(); renderScm(); }
+    if (!buffer.dirty) { buffer.dirty = true; groups.forEach((_x, i) => renderTabsFor(i)); renderTree(); renderScm(); }
   }
-  syncHl();
-  scheduleComplete();
-  scheduleDiagnostics();
+  syncHl(gi);
+  if (gi === activeGroup) { scheduleComplete(); scheduleDiagnostics(); }
+  // a shared file open in the other group refreshes there too
+  groups.forEach((other, oi) => {
+    if (oi !== gi && other.active === g.active) {
+      const ota = $(`edta${oi}`);
+      if (ota && ota.value !== value) { ota.value = value; syncHl(oi); }
+    }
+  });
 }
 
-function onEditorKey(e) {
-  const suggestOpen = !$("suggest").hidden;
+function onEditorKey(e, gi) {
+  const suggestOpen = !$(`suggest${gi}`).hidden;
   if (suggestOpen) {
     if (e.key === "ArrowDown") { moveSuggest(1); e.preventDefault(); return; }
     if (e.key === "ArrowUp") { moveSuggest(-1); e.preventDefault(); return; }
     if (e.key === "Tab" || e.key === "Enter") { acceptSuggest(); e.preventDefault(); return; }
-    if (e.key === "Escape") { closeSuggest(); e.preventDefault(); return; }
+    if (e.key === "Escape") { closeSuggest(gi); e.preventDefault(); return; }
   }
   if (e.key === "Tab") {
     e.preventDefault();
-    const ta = $("edta"), s = ta.selectionStart;
+    const ta = $(`edta${gi}`), s = ta.selectionStart;
     ta.value = ta.value.slice(0, s) + "    " + ta.value.slice(ta.selectionEnd);
     ta.setSelectionRange(s + 4, s + 4);
-    onEdit();
+    onEdit(gi);
   }
 }
 
-// ---------- tabs ----------
-function renderTabs() {
-  $("tabs").innerHTML = tabs.map(p => {
-    const name = p.split("/").pop();
-    const buffer = files.get(p);
-    const closer = buffer && buffer.dirty
-      ? '<span class="dot">●</span>'
-      : `<button class="x" data-x="${esc(p)}" title="Close">✕</button>`;
-    return `<div class="tab ${p === active ? "on" : ""}" data-p="${esc(p)}" role="tab">
-      ${fileIcon(name)}<span>${esc(name)}</span>${closer}</div>`;
-  }).join("");
+function openFile(path, gi = activeGroup) {
+  if (!files.has(path) || !groups[gi]) return;
+  const g = groups[gi];
+  if (!g.tabs.includes(path)) g.tabs.push(path);
+  g.active = path;
+  activeGroup = gi;
+  syncActive();
+  document.querySelectorAll(".group").forEach(el =>
+    el.classList.toggle("focused", Number(el.dataset.g) === activeGroup));
+  renderTabsFor(gi); renderEditorFor(gi); renderTree();
 }
 
-function openFile(path) {
-  if (!files.has(path)) return;
-  if (!tabs.includes(path)) tabs.push(path);
-  active = path;
-  renderTabs(); renderTree(); renderEditor();
+function closeTab(path, gi = activeGroup) {
+  const g = groups[gi];
+  if (!g) return;
+  g.tabs = g.tabs.filter(p => p !== path);
+  if (g.active === path) g.active = g.tabs[g.tabs.length - 1] || null;
+  if (groups.length > 1 && g.tabs.length === 0) {
+    groups.splice(gi, 1);
+    activeGroup = 0;
+    syncActive();
+    renderGroups(); renderTree();
+    return;
+  }
+  syncActive();
+  renderTabsFor(gi); renderEditorFor(gi); renderTree();
 }
-
-function closeTab(path) {
-  tabs = tabs.filter(p => p !== path);
-  if (active === path) active = tabs[tabs.length - 1] || null;
-  renderTabs(); renderTree(); renderEditor();
-}
-
-$("tabs").addEventListener("click", e => {
-  const x = e.target.closest("[data-x]");
-  if (x) { closeTab(x.dataset.x); e.stopPropagation(); return; }
-  const t = e.target.closest("[data-p]");
-  if (t) openFile(t.dataset.p);
-});
-$("tabs").addEventListener("auxclick", e => {  // middle-click closes, like VS Code
-  const t = e.target.closest("[data-p]");
-  if (t && e.button === 1) closeTab(t.dataset.p);
-});
 
 // ---------- tree ----------
-function buildTree() {
+function buildTreeModel() {
   const root = {};
   for (const path of [...files.keys()].sort()) {
     let node = root;
@@ -696,7 +863,7 @@ function renderTree() {
         ${fileIcon(f.name)}<span class="name">${esc(f.name)}</span></div>`);
     }
   };
-  walk(buildTree(), "", 0);
+  walk(buildTreeModel(), "", 0);
   $("tree").innerHTML = html.join("");
   $("tree-note").hidden = files.size > 0;
   $("open-folder").hidden = files.size > 0;
@@ -712,9 +879,7 @@ $("tree").addEventListener("click", e => {
   const f = e.target.closest("[data-f]");
   if (f) openFile(f.dataset.f);
 });
-$("ws-sect").addEventListener("click", () => {
-  $("ws-body").hidden = !$("ws-body").hidden;
-});
+$("ws-sect").addEventListener("click", () => { $("ws-body").hidden = !$("ws-body").hidden; });
 
 // ---------- workspace / folder loading ----------
 const SKIP_DIRS = /(^|\/)(\.git|node_modules|__pycache__|\.venv|venv|dist|build|\.pytest_cache|\.mypy_cache)(\/|$)/;
@@ -733,22 +898,24 @@ function setTitle() {
   $("ws-name").textContent = folderName ? folderName.toUpperCase() : "No Folder Opened";
 }
 
+function resetGroups() { groups = [{ tabs: [], active: null }]; activeGroup = 0; syncActive(); }
+
 function replaceWorkspace(name, entries) {
-  files.clear(); fileHandles.clear(); tabs = []; active = null; collapsed.clear();
+  files.clear(); fileHandles.clear(); resetGroups(); collapsed.clear();
   for (const [path, content, handle] of entries) {
     files.set(path, { content, dirty: false });
     if (handle) fileHandles.set(path, handle);
   }
   folderName = name;
-  setTitle(); renderTabs(); renderTree(); renderEditor(); renderScm();
+  setTitle(); renderGroups(); renderTree(); renderScm();
   termPrint(`<span class="dim">opened ${name}: ${entries.length} files`
     + (fileHandles.size ? " (disk handles held — Ctrl+S saves back)" : "") + "</span>");
 }
 
 function closeFolder() {
   if (!confirmDiscard()) return;
-  files.clear(); fileHandles.clear(); tabs = []; active = null; collapsed.clear(); folderName = null;
-  setTitle(); renderTabs(); renderTree(); renderEditor(); renderScm();
+  files.clear(); fileHandles.clear(); resetGroups(); collapsed.clear(); folderName = null;
+  setTitle(); renderGroups(); renderTree(); renderScm();
   termPrint('<span class="dim">folder closed</span>');
 }
 
@@ -801,7 +968,7 @@ $("folder-input").addEventListener("change", async e => {
   e.target.value = "";
 });
 
-// ---------- saving (File System Access) ----------
+// ---------- saving ----------
 async function _writeHandle(handle, content) {
   try {
     const writable = await handle.createWritable();
@@ -830,7 +997,7 @@ async function saveActive() {
   try {
     await _writeHandle(handle, buffer.content);
     buffer.dirty = false;
-    renderTabs(); renderTree(); renderScm();
+    groups.forEach((_g, gi) => renderTabsFor(gi)); renderTree(); renderScm();
     termPrint(`<span class="ok">✓ saved ${esc(active)}</span>`);
   } catch (err) {
     termPrint(`<span class="err">save failed: ${esc(String(err))}</span>`);
@@ -856,14 +1023,14 @@ async function saveProjectAs() {
       buffer.dirty = false;
       saved++;
     }
-    renderTabs(); renderTree(); renderScm();
+    groups.forEach((_g, gi) => renderTabsFor(gi)); renderTree(); renderScm();
     termPrint(`<span class="ok">✓ saved ${saved} file(s) into ${esc(root.name)}/ — Ctrl+S now saves back</span>`);
   } catch (err) {
     if (err && err.name !== "AbortError") termPrint(`<span class="err">save failed: ${esc(String(err))}</span>`);
   }
 }
 
-// ---------- recent folders (IndexedDB) ----------
+// ---------- recent folders ----------
 function idb() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open("detcode-workbench", 1);
@@ -906,7 +1073,7 @@ async function openRecent(name) {
 let openMenu = null;
 
 function execEdit(command) {
-  const ta = $("edta") || $("term-in");
+  const ta = E("edta") || $("term-in");
   ta.focus();
   document.execCommand(command);
 }
@@ -921,7 +1088,7 @@ async function menuItems(which) {
     { label: "Paste", hint: "Ctrl+V", action: () => execEdit("paste") },
   ];
   if (which === "selection") return [
-    { label: "Select All", hint: "Ctrl+A", action: () => { const ta = $("edta"); if (ta) { ta.focus(); ta.select(); } } },
+    { label: "Select All", hint: "Ctrl+A", action: () => { const ta = E("edta"); if (ta) { ta.focus(); ta.select(); } } },
   ];
   if (which === "view") return [
     { label: "Command Palette…", hint: "Ctrl+Shift+P", action: () => openQuick(">") },
@@ -931,6 +1098,8 @@ async function menuItems(which) {
     { label: "Source Control", action: () => showView("scm") },
     { label: "Extensions: Packs", action: () => showView("ext") },
     { label: "detcode Engine", action: () => showView("detcode") },
+    "-",
+    { label: "Split Editor", hint: "Ctrl+\\", disabled: !active || groups.length >= 2, action: splitEditor },
     "-",
     { label: "Problems", action: () => showPanel("problems") },
     { label: "Output", action: () => showPanel("output") },
@@ -956,7 +1125,6 @@ async function menuItems(which) {
     "-",
     { label: "About detcode", action: () => { showPanel("terminal"); termPrint('<span class="dim">detcode — an LLM-style coding assistant with no LLM. Deterministic, auditable, honest about refusals.</span>'); } },
   ];
-  // file
   const items = [
     { label: "Open Folder…", hint: "Ctrl+K Ctrl+O", action: openFolder },
   ];
@@ -1021,6 +1189,41 @@ document.addEventListener("click", e => {
   if (openMenu && !e.target.closest("#menubar") && !e.target.closest("#dropdown")) closeDropdown();
 });
 
+// ---------- sashes (drag resize) ----------
+function initSashes() {
+  const saved = JSON.parse(localStorage.getItem("detcode-layout") || "{}");
+  if (saved.sbw) document.documentElement.style.setProperty("--sbw", saved.sbw + "px");
+  if (saved.ph) document.documentElement.style.setProperty("--ph", saved.ph + "px");
+  let mode = null;
+  const persist = () => {
+    const style = getComputedStyle(document.documentElement);
+    localStorage.setItem("detcode-layout", JSON.stringify({
+      sbw: parseInt(style.getPropertyValue("--sbw")), ph: parseInt(style.getPropertyValue("--ph")),
+    }));
+  };
+  $("vsash").addEventListener("mousedown", () => { mode = "v"; $("vsash").classList.add("dragging"); document.body.classList.add("resizing"); });
+  $("hsash").addEventListener("mousedown", () => { mode = "h"; $("hsash").classList.add("dragging"); document.body.classList.add("resizing"); });
+  document.addEventListener("mousemove", e => {
+    if (!mode) return;
+    if (mode === "v") {
+      const width = Math.max(140, Math.min(window.innerWidth * 0.5, e.clientX - 48));
+      document.documentElement.style.setProperty("--sbw", width + "px");
+    } else {
+      const height = Math.max(80, Math.min(window.innerHeight * 0.75, window.innerHeight - e.clientY - 24));
+      document.documentElement.style.setProperty("--ph", height + "px");
+    }
+  });
+  document.addEventListener("mouseup", () => {
+    if (!mode) return;
+    mode = null;
+    $("vsash").classList.remove("dragging"); $("hsash").classList.remove("dragging");
+    document.body.classList.remove("resizing");
+    persist();
+    refreshMinimaps();
+  });
+  window.addEventListener("resize", refreshMinimaps);
+}
+
 // ---------- activity bar / views ----------
 function showView(which) {
   for (const view of ["explorer", "search", "scm", "debug", "ext", "detcode"]) {
@@ -1036,7 +1239,6 @@ document.querySelectorAll(".ab-item[data-view]").forEach(el =>
   el.addEventListener("click", () => showView(el.dataset.view)));
 document.querySelector("[data-view-toggle]").addEventListener("click", () => showView("detcode"));
 
-// search view
 let searchTimer = null;
 $("search-input").addEventListener("input", () => {
   clearTimeout(searchTimer);
@@ -1047,14 +1249,12 @@ function runSearch() {
   const box = $("search-results");
   if (needle.length < 2) { box.innerHTML = ""; return; }
   const html = [];
-  let total = 0;
   for (const [path, buffer] of [...files.entries()].sort()) {
     const hits = [];
     buffer.content.split("\n").forEach((line, i) => {
       if (hits.length < 6 && line.toLowerCase().includes(needle)) hits.push([i + 1, line.trim().slice(0, 60)]);
     });
     if (!hits.length) continue;
-    total += hits.length;
     html.push(`<div class="sb-item" data-open="${esc(path)}">${fileIcon(path.split("/").pop())}<span>${esc(path.split("/").pop())}</span><span class="dim">${hits.length}</span></div>`);
     for (const [ln, text] of hits) {
       html.push(`<div class="sb-item" data-open="${esc(path)}" data-line="${ln}" style="padding-left:28px"><span class="mono dim">${ln}</span><span class="mono">${esc(text)}</span></div>`);
@@ -1068,11 +1268,10 @@ $("search-results").addEventListener("click", e => {
   if (!el) return;
   openFile(el.dataset.open);
   const line = Number(el.dataset.line || 1);
-  const ta = $("edta");
+  const ta = E("edta");
   if (ta) { ta.scrollTop = Math.max(0, (line - 3) * 19); ta.focus(); }
 });
 
-// scm view: dirty buffers
 function renderScm() {
   const dirty = [...files.entries()].filter(([, f]) => f.dirty).map(([p]) => p);
   $("scm-badge").hidden = dirty.length === 0;
@@ -1086,10 +1285,8 @@ $("scm-changes").addEventListener("click", e => {
   if (el) openFile(el.dataset.open);
 });
 
-// debug view
 $("run-tests").addEventListener("click", () => { showPanel("terminal"); runCommand("test"); });
 
-// extensions view: packs
 async function loadPacks() {
   try {
     const resp = await api({ tool: "packs" });
@@ -1110,7 +1307,7 @@ $("ext-list").addEventListener("click", e => {
   }
 });
 
-// ---------- detcode panel: quick cmds, teach, mint, study ----------
+// ---------- detcode side panel ----------
 const QUICK = [
   "how should I store money amounts?",
   "advise",
@@ -1174,7 +1371,7 @@ async function refreshStudy() {
   } catch { /* server unreachable */ }
 }
 
-// ---------- panel (problems / output / terminal) ----------
+// ---------- panel ----------
 function showPanel(which) {
   document.body.classList.remove("panel-hidden");
   for (const tab of ["problems", "output", "terminal"]) {
@@ -1199,7 +1396,6 @@ function outputLog(line) {
   out.scrollTop = out.scrollHeight;
 }
 
-// diagnostics -> problems panel + status bar
 let diagTimer = null;
 function scheduleDiagnostics() {
   clearTimeout(diagTimer);
@@ -1237,15 +1433,15 @@ $("panel-problems").addEventListener("click", e => {
   const fix = e.target.closest("[data-fix]");
   if (fix) { showPanel("terminal"); runCommand(fix.dataset.fix); return; }
   const item = e.target.closest("[data-line]");
-  if (item && $("edta")) {
-    const ta = $("edta");
+  if (item && E("edta")) {
+    const ta = E("edta");
     ta.scrollTop = Math.max(0, (Number(item.dataset.line) - 3) * 19);
     ta.focus();
   }
 });
 $("st-problems").addEventListener("click", () => showPanel("problems"));
 
-// ---------- autocomplete ----------
+// ---------- autocomplete (active group) ----------
 let sugItems = [], sugIndex = 0, sugPrefix = "", completeTimer = null, chW = 0;
 
 function measureCh() {
@@ -1261,7 +1457,7 @@ function measureCh() {
 }
 
 function currentPrefix() {
-  const ta = $("edta");
+  const ta = E("edta");
   const upto = ta.value.slice(0, ta.selectionStart);
   const m = /[A-Za-z_]\w*$/.exec(upto);
   return m ? m[0] : "";
@@ -1269,21 +1465,22 @@ function currentPrefix() {
 
 function scheduleComplete() {
   clearTimeout(completeTimer);
+  if (!E("edta")) return;
   const prefix = currentPrefix();
-  if (prefix.length < 2 || !active || !active.endsWith(".py")) { closeSuggest(); return; }
+  if (prefix.length < 2 || !active || !active.endsWith(".py")) { closeSuggest(activeGroup); return; }
   completeTimer = setTimeout(async () => {
     try {
-      const resp = await api({ tool: "complete", source: $("edta").value, prefix }, true);
-      if (resp.ok && resp.items && resp.items.length && currentPrefix() === prefix) {
+      const resp = await api({ tool: "complete", source: E("edta").value, prefix }, true);
+      if (resp.ok && resp.items && resp.items.length && E("edta") && currentPrefix() === prefix) {
         sugItems = resp.items; sugIndex = 0; sugPrefix = prefix;
         showSuggest();
-      } else closeSuggest();
-    } catch { closeSuggest(); }
+      } else closeSuggest(activeGroup);
+    } catch { closeSuggest(activeGroup); }
   }, 160);
 }
 
 function showSuggest() {
-  const ta = $("edta"), sug = $("suggest");
+  const ta = E("edta"), sug = E("suggest");
   const upto = ta.value.slice(0, ta.selectionStart);
   const lines = upto.split("\n");
   const top = lines.length * 19 - ta.scrollTop + 6;
@@ -1301,15 +1498,15 @@ function moveSuggest(delta) {
   sugIndex = (sugIndex + delta + sugItems.length) % sugItems.length;
   showSuggest();
 }
-function closeSuggest() {
-  const sug = $("suggest");
+function closeSuggest(gi = activeGroup) {
+  const sug = $(`suggest${gi}`);
   if (sug) sug.hidden = true;
   sugItems = [];
 }
 function acceptSuggest() {
   const item = sugItems[sugIndex];
   if (!item) return;
-  const ta = $("edta");
+  const ta = E("edta");
   const start = ta.selectionStart - sugPrefix.length;
   const lineStart = ta.value.lastIndexOf("\n", start - 1) + 1;
   const wholeFunction = item.kind === "corpus" && ta.value.slice(lineStart, start).trim() === "";
@@ -1317,12 +1514,12 @@ function acceptSuggest() {
   ta.value = ta.value.slice(0, start) + insert + ta.value.slice(ta.selectionEnd);
   const caret = start + insert.length;
   ta.setSelectionRange(caret, caret);
-  closeSuggest();
-  onEdit();
+  closeSuggest(activeGroup);
+  onEdit(activeGroup);
   if (wholeFunction) termPrint(`<span class="ok">⚡ inserted verified ${esc(item.label)} from the corpus</span>`);
 }
 document.addEventListener("click", e => {
-  const el = e.target.closest("#suggest .sug");
+  const el = e.target.closest(".suggest .sug");
   if (el) { sugIndex = Number(el.dataset.i); acceptSuggest(); }
 });
 
@@ -1395,6 +1592,7 @@ const HELP = [
   ["query <question>", "knowledge web: evidence with citations"],
   ["mint <kw1,kw2>", "mint the workspace as a pack (its tests must pass)"],
   ["test", "run the workspace tests server-side"],
+  ["split", "split the editor (also Ctrl+\\)"],
   ["save / save project", "write buffers back to disk (also Ctrl+S)"],
   ["<anything else>", "English, acting on the active file (ask/fix/explain/...)"],
 ].map(([c, d]) => `  <span class="ok">${c.padEnd(22)}</span><span class="dim">${d}</span>`).join("\n");
@@ -1413,6 +1611,7 @@ async function runCommand(raw) {
   if (!cmd) return;
   if (cmd === "help") { termPrint(HELP); return; }
   if (cmd === "clear") { $("term-out").innerHTML = ""; return; }
+  if (cmd === "split") { splitEditor(); return; }
   if (cmd === "ls") {
     termPrint([...files.keys()].sort().map(p => "  " + esc(p)).join("\n") || '<span class="dim">no files loaded</span>');
     return;
@@ -1492,7 +1691,8 @@ async function runCommand(raw) {
           if (active && files.has(active)) {
             const changed = files.get(active).content !== resp.output;
             files.set(active, { content: resp.output, dirty: changed });
-            renderTabs(); renderTree(); renderScm(); renderEditor();
+            groups.forEach((_g, gi) => renderTabsFor(gi)); renderTree(); renderScm();
+            renderEditorFor(activeGroup);
             termPrint(changed
               ? `<span class="ok">✎ applied to ${esc(active)} (in-memory buffer)</span>`
               : `<span class="dim">no change needed in ${esc(active)}</span>`);
@@ -1534,8 +1734,7 @@ $("term-in").addEventListener("keydown", e => {
 let qoItems = [], qoIndex = 0;
 
 function openQuick(prefix) {
-  const overlay = $("quickopen");
-  overlay.hidden = false;
+  $("quickopen").hidden = false;
   const input = $("qo-input");
   input.value = prefix;
   input.focus();
@@ -1564,20 +1763,26 @@ function quickCandidates(value) {
       ["detcode: Query Knowledge Web", "query "],
       ["detcode: Mint This Project", "mint "],
       ["detcode: Save Project As", "save project"],
+      ["View: Split Editor", "split"],
       ["File: Save", "save"],
       ["Help: Show Terminal Commands", "help"],
     ];
     return commands
       .filter(([label]) => !needle || fuzzy(needle, label))
-      .map(([label, cmd]) => ({ label, hint: cmd, action: () => { showPanel("terminal"); $("term-in").value = cmd; $("term-in").focus(); if (!cmd.endsWith(" ")) runCommand(cmd), $("term-in").value = ""; } }));
+      .map(([label, cmd]) => ({ label, hint: cmd, action: () => {
+        showPanel("terminal");
+        if (cmd.endsWith(" ")) { $("term-in").value = cmd; $("term-in").focus(); }
+        else runCommand(cmd);
+      }}));
   }
   if (value.startsWith("@")) {
     const needle = value.slice(1).trim();
     if (!active || !files.has(active)) return [];
     return [...files.get(active).content.matchAll(/^(?:def|class)\s+([A-Za-z_]\w*)/gm)]
-      .map(m => ({ label: m[1], hint: m[0].startsWith("class") ? "class" : "def", line: files.get(active).content.slice(0, m.index).split("\n").length }))
+      .map(m => ({ label: m[1], hint: m[0].startsWith("class") ? "class" : "def",
+        line: files.get(active).content.slice(0, m.index).split("\n").length }))
       .filter(item => !needle || fuzzy(needle, item.label))
-      .map(item => ({ ...item, action: () => { const ta = $("edta"); if (ta) { ta.scrollTop = Math.max(0, (item.line - 3) * 19); ta.focus(); } } }));
+      .map(item => ({ ...item, action: () => { const ta = E("edta"); if (ta) { ta.scrollTop = Math.max(0, (item.line - 3) * 19); ta.focus(); } } }));
   }
   const needle = value.trim();
   return [...files.keys()].sort()
@@ -1626,6 +1831,7 @@ document.addEventListener("keydown", e => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); showView("explorer"); return; }
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); showView("search"); return; }
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); openQuick("@"); return; }
+  if (e.ctrlKey && e.key === "\\") { e.preventDefault(); splitEditor(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "j") { e.preventDefault(); togglePanel(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "s" && !chordPending) { e.preventDefault(); saveActive(); return; }
   if (e.ctrlKey && e.key === "`") {
@@ -1647,7 +1853,8 @@ document.addEventListener("keydown", e => {
 });
 
 // ---------- boot ----------
-setTitle(); renderEditor(); renderTree(); renderScm(); refreshStudy(); showPanel("terminal");
+initSashes();
+setTitle(); renderGroups(); renderTree(); renderScm(); refreshStudy(); showPanel("terminal");
 termPrint('<span class="dim">detcode terminal — type help. Engine responses are deterministic and carry provenance.</span>');
 fetch("/api/run").then(r => r.json()).then(u => {
   $("st-version").textContent = `⟡ detcode ${u.version || ""}`;

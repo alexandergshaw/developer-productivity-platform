@@ -164,6 +164,16 @@ BUILTIN_KNOWLEDGE: tuple[dict, ...] = (
         }],
     ),
     _b(
+        "Import hygiene",
+        ["import", "imports", "unused", "module", "namespace", "circular"],
+        "Unused imports are noise that misleads readers about dependencies and "
+        "slows cold starts; `import *` hides where names come from and invites "
+        "collisions. Keep imports minimal, explicit, and grouped (stdlib / "
+        "third-party / local). detcode automates the cleanup: `remove unused "
+        "imports` and `sort imports` (or `clean up` for both).",
+        sources=["https://peps.python.org/pep-0008/#imports"],
+    ),
+    _b(
         "Money and floats",
         ["money", "float", "floats", "currency", "cents", "decimal", "rounding", "amount"],
         "Binary floats cannot represent most decimal fractions: 0.1 + 0.2 != "
@@ -379,6 +389,71 @@ def ask(
         question_keywords=sorted(question_words),
     )
     return Answer("miss", text, None, report)
+
+
+def advise(source: str, extra_entries: tuple = ()) -> Answer:
+    """Context-aware guidance: map the file's diagnostics to lessons.
+
+    Runs the deterministic diagnostics, then pairs each finding with the
+    best-matching knowledge topic — the warning AND the education.
+    """
+    from .diagnose import diagnostics
+
+    items = diagnostics(source)
+    if not items:
+        report = provenance("advise", RULE_VERSION, findings=0, lessons=0)
+        return Answer(
+            "advise",
+            "No problems detected — nothing in this file to teach from.",
+            None,
+            report,
+        )
+
+    candidates = [(e, "builtin") for e in BUILTIN_KNOWLEDGE]
+    candidates += [(e, "learned") for e in extra_entries]
+
+    lessons: list[tuple[str, dict, str, list]] = []  # (topic, entry, origin, findings)
+    unmatched: list[dict] = []
+    for item in items:
+        finding_words = _words(item["message"])
+        scored = sorted(
+            ((entry, origin, _score(entry, finding_words)) for entry, origin in candidates),
+            key=lambda t: (-t[2], t[0]["topic"]),
+        )
+        if scored and scored[0][2] > 0:
+            entry, origin, _s = scored[0]
+            existing = next((l for l in lessons if l[0] == entry["topic"]), None)
+            if existing:
+                existing[3].append(item)
+            else:
+                lessons.append((entry["topic"], entry, origin, [item]))
+        else:
+            unmatched.append(item)
+
+    lines = [f"Reviewed the file: {len(items)} finding(s), {len(lessons)} lesson(s)."]
+    for topic, entry, origin, findings in lessons:
+        lines.append("")
+        lines.append(f"## {topic}")
+        for f in findings:
+            lines.append(f"  L{f['line']}: {f['message']}")
+        lines.append("")
+        lines.append(entry["guidance"])
+        if entry["sources"]:
+            lines.append(f"Source: {entry['sources'][0]}")
+        if any(f["fix"] for f in findings):
+            fix = next(f["fix"] for f in findings if f["fix"])
+            lines.append(f"Quick fix available: {fix}")
+    if unmatched:
+        lines.append("")
+        lines.append("Other findings (no lesson on file yet — ask, and it joins the study queue):")
+        lines.extend(f"  L{f['line']}: {f['message']}" for f in unmatched)
+
+    report = provenance(
+        "advise", RULE_VERSION,
+        findings=len(items), lessons=len(lessons),
+        topics=[t for t, _e, _o, _f in lessons],
+    )
+    return Answer("advise", "\n".join(lines), None, report)
 
 
 def learn(entry: dict, knowledge_text: str | None = None) -> tuple[str, dict]:

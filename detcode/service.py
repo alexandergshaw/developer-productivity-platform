@@ -240,6 +240,7 @@ def run_request(req, store=None) -> dict:
                 req.get("files") or {}, record["default_slug"]
             )
             store.upsert_pack(record)
+            store.close_questions(record["keywords"], f"minted {record['key']}")
             return _text(
                 f"minted pack {record['key']!r} — {result.testsRun} test(s) verified "
                 f"green; directions mentioning {', '.join(record['keywords'])} now "

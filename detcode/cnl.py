@@ -56,6 +56,7 @@ GRAMMAR = (
     "plan a <project direction>  (spec interview for unknown domains)",
     "teach <func> where <func>(args) == value [and ...]  (grow the corpus)",
     "ask <question>  (technical guidance; bare 'how/why/should ...' works too)",
+    "advise / review this file  (diagnostics paired with lessons)",
 )
 
 
@@ -184,6 +185,10 @@ _PATTERNS = (
         re.compile(r"^plan\s+(?:a|an)\s+(?P<direction>.+)$", re.IGNORECASE),
         lambda m: Intent.of("plan", direction=m["direction"]),
     ),
+    (
+        re.compile(r"^(?:advise|advise\s+me|review\s+(?:this\s+)?(?:file|code))$", re.IGNORECASE),
+        lambda m: Intent.of("advise"),
+    ),
     # Technical guidance. "ask ..." always works; bare question forms route
     # here too ("how do I store money", "should I use floats for currency").
     (
@@ -253,7 +258,8 @@ _REWRITES = (
 
 _CHAIN_VERBS = frozenset(
     "write make create build craft fix repair debug correct remove delete drop "
-    "strip rename explain describe summarize document add generate sort clean tidy plan teach".split()
+    "strip rename explain describe summarize document add generate sort clean "
+    "tidy plan teach ask advise review".split()
 )
 
 

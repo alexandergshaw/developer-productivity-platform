@@ -124,9 +124,28 @@ detcode packs import packs.json       # verified: structure, parse, TESTS GREEN
 detcode new "a studybuddy for revision season" # retrieves the whole project
 ```
 
-Functions are *taught* (corpus), projects are *minted* (packs) — both
-proof-carrying: teaching verifies in isolation, minting requires the
-project's own tests green, and everything is hash-verified on every load.
+Functions are *taught* (corpus), projects are *minted* (packs), and
+knowledge is *learned* — all proof-carrying: teaching verifies in isolation,
+minting requires the project's own tests green, learned guidance needs
+sources or assert-bearing examples that are re-verified on every load, and
+everything is hash-verified out of the database.
+
+## Technical guidance: ask, learn, study
+
+```bash
+detcode ask "should I use floats for money?"   # guidance with receipts
+detcode advise --file app.py                   # your diagnostics, paired with lessons
+detcode study                                  # questions the engine couldn't answer
+detcode learn --topic "..." --keywords a,b --source URL --guidance "..."
+detcode knowledge list | export | import       # share it, fully re-verified
+```
+
+`ask` cascades honestly: knowledge base (deterministic keyword scoring) →
+engine knowledge (corpus functions, packs) → **"I don't know this yet"**
+with the question logged to the study queue. The loop closes from every
+direction: `learn` adds a verified entry and answers matching open
+questions — and so do `teach` and `mint`, because experience counts. Bare
+questions work in English too ("how do I ...", "should I ...").
 The workbench teaches and mints too: the "TEACH FROM ACTIVE FILE" panel,
 `teach <func> where <func>(...) == ...` in the terminal, and "Mint this
 project…" / `mint kw1,kw2` (the workspace's tests run server-side and must

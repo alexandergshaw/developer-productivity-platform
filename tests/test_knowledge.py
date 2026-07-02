@@ -131,5 +131,84 @@ class StudyLoopTests(unittest.TestCase):
         self.assertIn("def f(x)", resp["output"])
 
 
+class AdviseTests(unittest.TestCase):
+    SOURCE = (
+        "import os\n\n\n"
+        "def risky(items=[]):\n"
+        "    if items == None:\n"
+        "        return []\n"
+        "    return items\n"
+    )
+
+    def test_findings_paired_with_lessons(self):
+        answer = knowledge.advise(self.SOURCE)
+        self.assertEqual(answer.outcome, "advise")
+        self.assertIn("Mutable default arguments", answer.text)
+        self.assertIn("Comparing with None", answer.text)
+        self.assertIn("L4:", answer.text)  # findings carry their lines
+        self.assertIn("Quick fix available", answer.text)
+        self.assertGreaterEqual(answer.report["lessons"], 2)
+
+    def test_clean_file_has_nothing_to_teach(self):
+        answer = knowledge.advise("def f(x):\n    return x\n")
+        self.assertIn("No problems detected", answer.text)
+
+    def test_english_review_command(self):
+        resp = run_request(
+            {"tool": "do", "command": "review this file", "source": self.SOURCE}
+        )
+        self.assertTrue(resp["ok"])
+        self.assertIn("lesson(s)", resp["output"])
+
+    def test_deterministic(self):
+        runs = {knowledge.advise(self.SOURCE).text for _ in range(5)}
+        self.assertEqual(len(runs), 1)
+
+
+class ExperienceClosesQuestionsTests(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="detcode_exp_")
+        self.store = Store(os.path.join(self.dir, "detcode.db"))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_teaching_answers_an_open_question(self):
+        run_request(
+            {"tool": "ask", "question": "how do I slugify a post title"}, store=self.store
+        )
+        self.assertEqual(self.store.open_questions()[0]["status"], "open")
+        taught = run_request(
+            {
+                "tool": "do",
+                "command": 'teach slugify where slugify("A B") == "a-b"',
+                "source": 'def slugify(text):\n    return "-".join(text.lower().split())\n',
+            },
+            store=self.store,
+        )
+        self.assertTrue(taught["ok"], taught.get("error"))
+        self.assertIn("closed 1 open question", taught["output"])
+        self.assertEqual(self.store.open_questions()[0]["status"], "answered")
+
+    def test_minting_answers_an_open_question(self):
+        from detcode.engines import builder
+
+        run_request(
+            {"tool": "ask", "question": "how do I build a moneymap tool"}, store=self.store
+        )
+        project = builder.build("an expense tracker")
+        run_request(
+            {
+                "tool": "mint",
+                "files": {f.path: f.content for f in project.files},
+                "keywords": ["moneymap"],
+            },
+            store=self.store,
+        )
+        record = self.store.open_questions()[0]
+        self.assertEqual(record["status"], "answered")
+        self.assertIn("minted", record["answered_by"])
+
+
 if __name__ == "__main__":
     unittest.main()

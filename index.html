@@ -181,6 +181,8 @@
       <div class="sb-section"><button class="sb-btn" id="mint-btn">Mint this project…</button></div>
       <div class="sb-title">PROBLEMS</div>
       <div class="sb-section" id="problems"><div class="sb-note">No problems detected.</div></div>
+      <div class="sb-title">STUDY QUEUE</div>
+      <div class="sb-section" id="study"><div class="sb-note">Questions the engine couldn't answer land here; learn closes them.</div></div>
       <div class="sb-title">GRAMMAR</div>
       <div class="sb-note" id="grammar-note">Deterministic, never guesses: unknown commands are refused with the closest supported form.</div>
     </div>
@@ -709,6 +711,8 @@ $("ab-detcode").addEventListener("click", () => showView("detcode"));
 
 // ---------- detcode quick panel ----------
 const QUICK = [
+  "how should I store money amounts?",
+  "advise",
   'new "a resume tailorer"',
   'new "a teaching assistant app"',
   "explain",
@@ -874,6 +878,21 @@ $("problems").addEventListener("click", e => {
   }
 });
 $("st-problems").addEventListener("click", () => showView("detcode"));
+
+// ---------- study queue (the getting-smarter loop, visible) ----------
+async function refreshStudy() {
+  try {
+    const resp = await api({ tool: "study" });
+    const box = $("study");
+    if (!resp.ok || !resp.output || resp.output.includes("empty")) {
+      box.innerHTML = '<div class="sb-note">Every question so far has an answer.</div>';
+      return;
+    }
+    const lines = resp.output.split("\n").slice(1, 9);
+    box.innerHTML = lines.map(l => `<div class="sb-note">${esc(l)}</div>`).join("")
+      + '<div class="sb-note" style="color:var(--green)">Close one: learn via the CLI, or teach/mint — experience answers questions.</div>';
+  } catch { /* server unreachable */ }
+}
 
 $("mint-btn").addEventListener("click", () => {
   const kw = prompt("Keywords for this pack (comma-separated):", "");
@@ -1046,6 +1065,7 @@ async function runCommand(raw) {
         }
         const rule = resp.report && (resp.report.rule || "");
         if (rule) termPrint(`<span class="dim">  [${esc(rule)}${resp.report.entry ? ": " + esc(resp.report.entry) : ""}]</span>`);
+        if (rule === "ask" || rule === "teach") refreshStudy();
         return;
       }
     }
@@ -1100,7 +1120,7 @@ document.addEventListener("keydown", e => {
 });
 
 // ---------- boot ----------
-setTitle(); renderEditor(); renderTree();
+setTitle(); renderEditor(); renderTree(); refreshStudy();
 termPrint('<span class="dim">detcode terminal — type help. Engine responses are deterministic and carry provenance.</span>');
 fetch("/api/run").then(r => r.json()).then(u => {
   $("st-version").textContent = u.version || "";

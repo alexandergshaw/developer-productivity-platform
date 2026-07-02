@@ -81,13 +81,18 @@ def run(intent: Intent, source: str | None = None, store=None) -> Outcome:
             store.corpus_text(),
         )
         store.replace_corpus(r.corpus_text)
-        return Outcome(
-            None,
-            f"taught {spec['function']!r} — {r.report['cases_verified']} example(s) "
-            f"verified; corpus now has {r.report['corpus_entries']} entr(y/ies)",
-            False,
-            r.report,
+        # Experience closes questions: a taught function answers open
+        # questions that mention its name words.
+        closed = store.close_questions(
+            spec["function"].split("_"), f"taught {spec['function']}"
         )
+        message = (
+            f"taught {spec['function']!r} — {r.report['cases_verified']} example(s) "
+            f"verified; corpus now has {r.report['corpus_entries']} entr(y/ies)"
+        )
+        if closed:
+            message += f"; closed {len(closed)} open question(s)"
+        return Outcome(None, message, False, r.report)
 
     if op == "rename-local":
         r = rewrite.rename_local(
@@ -150,6 +155,15 @@ def run(intent: Intent, source: str | None = None, store=None) -> Outcome:
                 intent.get("question") or "",
                 answer.report.get("question_keywords", []),
             )
+        return Outcome(None, answer.text, False, answer.report)
+
+    if op == "advise":
+        from .engines import knowledge
+
+        learned = ()
+        if store is not None:
+            learned = knowledge.load_knowledge(store.knowledge_text())
+        answer = knowledge.advise(_needs_source(intent, source), extra_entries=learned)
         return Outcome(None, answer.text, False, answer.report)
 
     if op == "add-function":

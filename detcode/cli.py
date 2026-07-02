@@ -162,6 +162,13 @@ def _cmd_teach(args) -> int:
     examples = spec.get("examples") if isinstance(spec, dict) else spec
     result = teach.teach(_read(args.file), args.func, examples, _existing_corpus_text(args.corpus))
     where = _persist_corpus(result.corpus_text, args.corpus, "teach")
+    if not args.corpus:
+        from . import store as store_module
+
+        for question in store_module.Store().close_questions(
+            args.func.split("_"), f"taught {args.func}"
+        ):
+            print(f"  answers open question: {question}", file=sys.stderr)
     print(
         f"{where}: taught {args.func!r} "
         f"({result.report['cases_verified']} example(s) verified, "
@@ -247,6 +254,18 @@ def _cmd_ask(args) -> int:
 
     store = store_module.Store()
     outcome = planner.run(Intent.of("ask", question=args.question), None, store)
+    print(outcome.output)
+    return 0
+
+
+def _cmd_advise(args) -> int:
+    from . import store as store_module
+    from .ir import Intent
+
+    store = (
+        store_module.Store() if os.path.exists(store_module.DEFAULT_DB_PATH) else None
+    )
+    outcome = planner.run(Intent.of("advise"), _read(args.file), store)
     print(outcome.output)
     return 0
 
@@ -428,6 +447,7 @@ def _cmd_mint(args) -> int:
     result = mint_engine.verify_project(root, record["default_slug"])
     store = store_module.Store()
     store.upsert_pack(record)
+    store.close_questions(record["keywords"], f"minted {record['key']}")
     report = mint_engine.mint_report(record, result.testsRun)
     print(
         f"{store.path}: minted pack {record['key']!r} "
@@ -655,6 +675,10 @@ def build_parser() -> argparse.ArgumentParser:
     ak = sub.add_parser("ask", help="technical guidance (not code generation)")
     ak.add_argument("question", help='e.g. "how should I store money amounts?"')
     ak.set_defaults(handler=_cmd_ask)
+
+    av = sub.add_parser("advise", help="review a file: diagnostics paired with lessons")
+    av.add_argument("--file", required=True, help="Python source file")
+    av.set_defaults(handler=_cmd_advise)
 
     ln = sub.add_parser(
         "learn", help="add a verified knowledge entry (closes matching open questions)"

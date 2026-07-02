@@ -66,6 +66,8 @@ And detcode can build out whole experimental projects from a direction:
 ```bash
 detcode new "a resume tailorer" --out resume_tailorer
 detcode new "a teaching assistant app" --out teaching_assistant
+detcode new "an expense tracker" --web --out expense_tracker   # + WSGI web UI
+detcode new "a teaching assistant with a resume module" --out suite  # composition
 detcode new "an invoice reconciliation tool" --dry-run   # decisions + file list
 
 cd resume_tailorer
@@ -110,10 +112,13 @@ See [examples/](examples/) for the spec, example-set, and repair-spec formats.
 
 ## Web playground (Vercel)
 
-A static playground UI ([index.html](index.html)) served by a stdlib WSGI app
-([main.py](main.py) — the entrypoint Vercel's Python builder detects) exposes
-every engine over HTTP. detcode is stdlib-only, so there is nothing to install
-or configure:
+The web UI ([index.html](index.html)) is a VS Code-style workbench: a file
+explorer that loads folders of code in the browser, a tabbed editor with
+Python syntax highlighting, and a terminal that talks to the engine —
+`new "a resume tailorer"` materializes a whole project into the explorer, and
+English commands act on the active file's buffer. It is served by a stdlib
+WSGI app ([main.py](main.py) — the entrypoint Vercel's Python builder
+detects). detcode is stdlib-only, so there is nothing to install or configure:
 
 ```bash
 # local development — runs the exact WSGI app Vercel deploys
@@ -178,10 +183,15 @@ pure function of an `Intent` plus source. Edits are span-based
    every decision (domain pack, package name, layout) comes from a fixed
    procedure and is recorded in the build report and the generated README.
    Domain packs ship real, tested logic — **resume tailorer** (keyword
-   extraction, coverage scoring, bullet ranking, tailoring suggestions) and
+   extraction, coverage scoring, bullet ranking, tailoring suggestions),
    **teaching assistant** (flashcards from notes, cloze quizzes, SM-2 spaced
-   repetition); unmatched directions get a runnable skeleton that marks
-   exactly where the domain logic goes
+   repetition), and **expense tracker** (CSV parsing, keyword-rule
+   categorization, integer-cents monthly reports); unmatched directions get a
+   runnable skeleton that marks exactly where the domain logic goes.
+   Directions matching several packs **compose** ("a teaching assistant with
+   a resume module" — the pack named earliest is primary, each ships as its
+   own package), and `--web` (or "... with a web ui") wraps the primary CLI
+   in a stdlib WSGI page — the same pattern detcode's own playground uses
 
 Every front-end compiles to an `Intent` (`ir.py`) dispatched by `planner.py`;
 the same seam serves the CLI, the CNL, and the web API (`service.py`).

@@ -150,7 +150,7 @@ def _cmd_gentest(args) -> int:
 
 
 def _cmd_new(args) -> int:
-    project = builder.build(args.direction, name=args.name)
+    project = builder.build(args.direction, name=args.name, web=args.web)
     if args.dry_run:
         print(f"project: {project.name} ({len(project.files)} files)")
         print("decisions:")
@@ -276,6 +276,10 @@ def build_parser() -> argparse.ArgumentParser:
     nw.add_argument("direction", help='e.g. "resume tailorer" or "teaching assistant app"')
     nw.add_argument("--out", help="target directory (default: the derived package name)")
     nw.add_argument("--name", help="override the derived package name")
+    nw.add_argument(
+        "--web", action="store_true",
+        help="add a stdlib WSGI web UI over the CLI (also triggered by 'with a web ui')",
+    )
     nw.add_argument(
         "--dry-run", action="store_true", help="print decisions and file list, write nothing"
     )

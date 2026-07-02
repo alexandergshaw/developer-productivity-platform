@@ -22,8 +22,11 @@ RULE_VERSION = "1"
 _DIRECTION_NOISE = frozenset(
     "a an the build make create start new me my for of and or to app apps "
     "application project projects tool please that will can helps help with "
-    "some this it".split()
+    "some this it web ui website browser frontend interface webapp module".split()
 )
+
+# Direction words that request the --web wrapper.
+_WEB_WORDS = frozenset("web ui website browser frontend webapp".split())
 
 
 class BuildError(Exception):
@@ -77,13 +80,14 @@ def _order_matches(direction: str, matches: list) -> list:
     return [m for _, m in sorted(enumerate(matches), key=first_position)]
 
 
-def elaborate(direction: str, name: str | None = None) -> dict:
+def elaborate(direction: str, name: str | None = None, web: bool = False) -> dict:
     """Derive the build plan from the direction, recording every decision."""
     if not isinstance(direction, str) or not direction.strip():
         raise BuildError("give a direction, e.g. detcode new \"resume tailorer\"")
 
     decisions: list[str] = []
     words = set(_words(direction))
+    web = web or bool(words & _WEB_WORDS)
 
     matches = _order_matches(direction, packs.match_all(words))
     if not matches:
@@ -125,10 +129,17 @@ def elaborate(direction: str, name: str | None = None) -> dict:
         pack_slugs.append((pack, pack.default_slug))
 
     entrypoints = " / ".join(f"python -m {s}" for _, s in pack_slugs)
-    decisions.append(
-        f"interface: command-line ({entrypoints}) — deterministic core "
-        "first; a UI can wrap it later"
-    )
+    if web:
+        decisions.append(
+            f"interface: command-line ({entrypoints}) plus a stdlib WSGI web UI "
+            "over the primary CLI (python devserver.py) — the same pattern "
+            "detcode's own playground uses"
+        )
+    else:
+        decisions.append(
+            f"interface: command-line ({entrypoints}) — deterministic core "
+            "first; a UI can wrap it later (--web or say 'with a web ui')"
+        )
     decisions.append("test suite included; run: python -m unittest discover -s tests")
 
     return {
@@ -137,6 +148,7 @@ def elaborate(direction: str, name: str | None = None) -> dict:
         "title": _title(slug),
         "pack": primary,
         "pack_slugs": pack_slugs,
+        "web": web,
         "decisions": decisions,
     }
 
@@ -152,13 +164,16 @@ def _readme(plan: dict) -> str:
         "",
     ]
     lines.extend(f"- {d}" for d in plan["decisions"])
+    usage = [f"python -m {plan['slug']} --help"]
+    if plan.get("web"):
+        usage.append("python devserver.py    # web UI at http://127.0.0.1:8000")
     lines.extend(
         [
             "",
             "## Usage",
             "",
             "```bash",
-            f"python -m {plan['slug']} --help",
+            *usage,
             "```",
             "",
             "## Development",
@@ -202,18 +217,28 @@ def _pyproject(plan: dict) -> str:
     )
 
 
-def build(direction: str, name: str | None = None) -> Project:
+def build(direction: str, name: str | None = None, web: bool = False) -> Project:
     """Build a complete project from a general direction.
 
     A direction matching several packs ("a teaching assistant with a resume
     module") composes them: each pack's package lands in the same project.
+    ``web=True`` (or "with a web ui" in the direction) adds a stdlib WSGI
+    wrapper over the primary package's CLI.
     """
-    plan = elaborate(direction, name)
+    plan = elaborate(direction, name, web)
     slug = plan["slug"]
 
+    template_sets = [
+        (pack.files(), pack_slug) for pack, pack_slug in plan["pack_slugs"]
+    ]
+    if plan["web"]:
+        from ..packs import webwrap
+
+        template_sets.append((webwrap.files(), slug))
+
     merged: dict[str, str] = {}
-    for pack, pack_slug in plan["pack_slugs"]:
-        for raw_path, raw_content in sorted(pack.files().items()):
+    for templates, pack_slug in template_sets:
+        for raw_path, raw_content in sorted(templates.items()):
             path = raw_path.replace("__PKG__", pack_slug)
             content = raw_content.replace("__PKG__", pack_slug)
             if path.endswith(".py"):
@@ -238,6 +263,7 @@ def build(direction: str, name: str | None = None) -> Project:
         packs=[p.key for p, _ in plan["pack_slugs"]],
         package=slug,
         packages=[s for _, s in plan["pack_slugs"]],
+        web=plan["web"],
         decisions=plan["decisions"],
         files=[f.path for f in files],
     )

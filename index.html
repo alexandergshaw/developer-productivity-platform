@@ -137,10 +137,12 @@
   .node.dirty .name::after { content: " ●"; color: var(--yellow); font-size: 10px; }
 
   /* ---------- editor groups ---------- */
-  #main { grid-area: main; display: flex; min-width: 0; min-height: 0; background: var(--ed-bg); }
+  #main { grid-area: main; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--ed-bg); }
+  .grow { display: flex; flex: 1 1 0; min-height: 90px; min-width: 0; }
   .group { flex: 1 1 0; display: flex; flex-direction: column; min-width: 120px; min-height: 0; }
   .gsash { flex: none; width: 4px; cursor: col-resize; background: var(--panel-border); transition: background .15s .2s; }
-  .gsash:hover, .gsash.dragging { background: var(--sash); }
+  .growsash { flex: none; height: 4px; cursor: row-resize; background: var(--panel-border); transition: background .15s .2s; }
+  .gsash:hover, .gsash.dragging, .growsash:hover, .growsash.dragging { background: var(--sash); }
   .gtabs { display: flex; background: var(--sb-bg); overflow-x: auto; flex: none; height: 35px; }
   .gtabs::-webkit-scrollbar { height: 3px; }
   .gactions { margin-left: auto; display: flex; align-items: center; gap: 2px; padding: 0 6px; flex: none; }
@@ -413,8 +415,9 @@
 "use strict";
 // ---------- state ----------
 const files = new Map();          // path -> { content, dirty, generated }
-const newGroup = (tabs = [], active = null, size = 1) => ({ tabs, active, size });
-let groups = [newGroup()];        // editor groups (N-way, split right)
+const newGroup = (tabs = [], active = null, size = 1, row = 0) => ({ tabs, active, size, row });
+let groups = [newGroup()];        // editor groups, sorted by row (grid = rows of columns)
+let rowSizes = [1];               // flex height per row
 let activeGroup = 0;
 const floats = new Map();         // path -> floating editor window
 let active = null;                // mirror of groups[activeGroup].active
@@ -444,6 +447,7 @@ const FOLDER_ICON = `<svg class="fico" viewBox="0 0 16 16" fill="none" stroke="#
 const CHEV_RIGHT = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M6 4l4 4-4 4z"/></svg>';
 const CHEV_DOWN = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 6l4 4 4-4z"/></svg>';
 const SPLIT_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="2.5" width="13" height="11"/><path d="M8 2.5v11"/></svg>';
+const SPLIT_DOWN_ICON = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="1.5" y="2.5" width="13" height="11"/><path d="M1.5 8h13"/></svg>';
 
 // ---------- python highlighter ----------
 const PY_KW = new Set(("def class return if elif else for while import from as with try except finally raise " +
@@ -499,48 +503,85 @@ function highlightPython(text) {
 const LANG_NAMES = { py: "Python", md: "Markdown", json: "JSON", js: "JavaScript",
   ts: "TypeScript", html: "HTML", css: "CSS", yml: "YAML", yaml: "YAML", toml: "TOML", txt: "Plain Text" };
 
+function rowNumbers() {
+  return [...new Set(groups.map(g => g.row))].sort((a, b) => a - b);
+}
+
 function renderGroups() {
   syncActive();
-  $("main").innerHTML = groups.map((g, gi) => `
-    <div class="group ${gi === activeGroup ? "focused" : ""}" data-g="${gi}" style="flex-grow:${g.size}">
-      <div class="gtabs" id="tabs${gi}" data-g="${gi}"></div>
-      <div class="gbc" id="breadcrumbs${gi}" hidden></div>
-      <div class="ged" id="editor${gi}"></div>
-    </div>`).join('<div class="gsash"></div>');
+  const rowsHtml = rowNumbers().map((r, ri) => {
+    const cells = groups
+      .map((g, gi) => ({ g, gi }))
+      .filter(({ g }) => g.row === r)
+      .map(({ g, gi }) => `
+        <div class="group ${gi === activeGroup ? "focused" : ""}" data-g="${gi}" style="flex-grow:${g.size}">
+          <div class="gtabs" id="tabs${gi}" data-g="${gi}"></div>
+          <div class="gbc" id="breadcrumbs${gi}" hidden></div>
+          <div class="ged" id="editor${gi}"></div>
+        </div>`).join('<div class="gsash"></div>');
+    return `<div class="grow" data-r="${ri}" style="flex-grow:${rowSizes[ri] ?? 1}">${cells}</div>`;
+  }).join('<div class="growsash"></div>');
+  $("main").innerHTML = rowsHtml;
   groups.forEach((_g, gi) => { renderTabsFor(gi); renderEditorFor(gi); });
   wireGroupEvents();
   wireGroupSashes();
 }
 
+function _dragSash(sash, onMove) {
+  sash.addEventListener("mousedown", e => {
+    e.preventDefault();
+    sash.classList.add("dragging");
+    document.body.classList.add("resizing");
+    const start = { x: e.clientX, y: e.clientY };
+    const move = ev => onMove(ev, start);
+    const up = () => {
+      document.removeEventListener("mousemove", move);
+      document.removeEventListener("mouseup", up);
+      sash.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      refreshMinimaps();
+    };
+    document.addEventListener("mousemove", move);
+    document.addEventListener("mouseup", up);
+  });
+}
+
 function wireGroupSashes() {
-  const groupEls = [...document.querySelectorAll("#main > .group")];
-  document.querySelectorAll("#main > .gsash").forEach((sash, si) => {
-    sash.addEventListener("mousedown", e => {
-      e.preventDefault();
-      sash.classList.add("dragging");
-      document.body.classList.add("resizing");
-      const leftEl = groupEls[si], rightEl = groupEls[si + 1];
-      const startX = e.clientX;
-      const leftW = leftEl.getBoundingClientRect().width;
-      const rightW = rightEl.getBoundingClientRect().width;
-      const pair = leftW + rightW;
-      const pairGrow = groups[si].size + groups[si + 1].size;
-      const onMove = ev => {
-        const delta = Math.max(120 - leftW, Math.min(rightW - 120, ev.clientX - startX));
-        groups[si].size = pairGrow * (leftW + delta) / pair;
-        groups[si + 1].size = pairGrow * (rightW - delta) / pair;
-        leftEl.style.flexGrow = groups[si].size;
-        rightEl.style.flexGrow = groups[si + 1].size;
-      };
-      const onUp = () => {
-        document.removeEventListener("mousemove", onMove);
-        document.removeEventListener("mouseup", onUp);
-        sash.classList.remove("dragging");
-        document.body.classList.remove("resizing");
-        refreshMinimaps();
-      };
-      document.addEventListener("mousemove", onMove);
-      document.addEventListener("mouseup", onUp);
+  // vertical sashes: trade width between the two adjacent groups in a row
+  document.querySelectorAll("#main .grow").forEach(rowEl => {
+    const cells = [...rowEl.querySelectorAll(":scope > .group")];
+    rowEl.querySelectorAll(":scope > .gsash").forEach((sash, si) => {
+      const leftEl = cells[si], rightEl = cells[si + 1];
+      const li = Number(leftEl.dataset.g), ri = Number(rightEl.dataset.g);
+      _dragSash(sash, (ev, start) => {
+        const leftW = leftEl.getBoundingClientRect().width;
+        const rightW = rightEl.getBoundingClientRect().width;
+        const delta = Math.max(120 - leftW, Math.min(rightW - 120, ev.clientX - start.x));
+        if (!delta) return;
+        const pair = leftW + rightW, grow = groups[li].size + groups[ri].size;
+        groups[li].size = grow * (leftW + delta) / pair;
+        groups[ri].size = grow * (rightW - delta) / pair;
+        leftEl.style.flexGrow = groups[li].size;
+        rightEl.style.flexGrow = groups[ri].size;
+        start.x = ev.clientX;
+      });
+    });
+  });
+  // horizontal sashes: trade height between the two adjacent rows
+  const rowEls = [...document.querySelectorAll("#main > .grow")];
+  document.querySelectorAll("#main > .growsash").forEach((sash, ri) => {
+    const topEl = rowEls[ri], bottomEl = rowEls[ri + 1];
+    _dragSash(sash, (ev, start) => {
+      const topH = topEl.getBoundingClientRect().height;
+      const bottomH = bottomEl.getBoundingClientRect().height;
+      const delta = Math.max(90 - topH, Math.min(bottomH - 90, ev.clientY - start.y));
+      if (!delta) return;
+      const pair = topH + bottomH, grow = (rowSizes[ri] ?? 1) + (rowSizes[ri + 1] ?? 1);
+      rowSizes[ri] = grow * (topH + delta) / pair;
+      rowSizes[ri + 1] = grow * (bottomH - delta) / pair;
+      topEl.style.flexGrow = rowSizes[ri];
+      bottomEl.style.flexGrow = rowSizes[ri + 1];
+      start.y = ev.clientY;
     });
   });
 }
@@ -595,17 +636,26 @@ function wireGroupEvents() {
   });
 }
 
-function collapseEmptyGroups(keep) {
-  // Remove emptied groups (except a sole survivor), giving their width to a
-  // neighbor — VS Code's collapse behavior.
+function normalizeLayout(keep) {
+  // Remove emptied groups (width goes to a same-row sibling), drop empty
+  // rows (height merges away via renumbering), keep indices sane.
   for (let i = groups.length - 1; i >= 0; i--) {
-    if (groups.length > 1 && groups[i].tabs.length === 0 && groups[i] !== keep) {
-      const neighbor = groups[i - 1] || groups[i + 1];
-      if (neighbor) neighbor.size += groups[i].size;
+    const g = groups[i];
+    if (groups.length > 1 && g.tabs.length === 0 && g !== keep) {
+      const sibling = groups.find((o, j) => o.row === g.row && j !== i);
+      if (sibling) sibling.size += g.size;
       groups.splice(i, 1);
     }
   }
+  if (!groups.length) { groups = [newGroup()]; rowSizes = [1]; }
+  const present = rowNumbers();
+  const remap = new Map(present.map((r, i) => [r, i]));
+  rowSizes = present.map(r => rowSizes[r] ?? 1);
+  groups.forEach(g => { g.row = remap.get(g.row); });
+  activeGroup = Math.max(0, Math.min(activeGroup, groups.length - 1));
+  syncActive();
 }
+const collapseEmptyGroups = normalizeLayout;  // legacy callers
 
 function moveTab(path, fromG, toG, index) {
   const src = groups[fromG], dst = groups[toG];
@@ -629,22 +679,44 @@ function splitEditor() {
   const current = groups[activeGroup];
   const half = current.size / 2;
   current.size = half;
-  groups.splice(activeGroup + 1, 0, newGroup([active], active, half));
+  groups.splice(activeGroup + 1, 0, newGroup([active], active, half, current.row));
   activeGroup = activeGroup + 1;
+  syncActive();
+  renderGroups(); renderTree();
+}
+
+function splitDown() {
+  // A new row directly below the current one, holding the active document —
+  // split right + split down compose into 2×2 and beyond.
+  if (!active) return;
+  const current = groups[activeGroup];
+  const r = current.row;
+  groups.forEach(g => { if (g.row > r) g.row += 1; });
+  let insertAt = groups.length;
+  for (let j = 0; j < groups.length; j++) {
+    if (groups[j].row > r + 1) { insertAt = j; break; }
+  }
+  const added = newGroup([active], active, 1, r + 1);
+  groups.splice(insertAt, 0, added);
+  const half = (rowSizes[r] ?? 1) / 2;
+  rowSizes[r] = half;
+  rowSizes.splice(r + 1, 0, half);
+  activeGroup = groups.indexOf(added);
   syncActive();
   renderGroups(); renderTree();
 }
 
 function runGroupAction(action, gi) {
   if (action === "split") { focusGroup(gi); splitEditor(); }
+  if (action === "splitdown") { focusGroup(gi); splitDown(); }
   if (action === "closegroup") {
     const removed = groups[gi];
-    const neighbor = groups[gi - 1] || groups[gi + 1];
-    if (neighbor && removed) neighbor.size += removed.size;
-    groups.splice(gi, 1);
-    if (!groups.length) groups = [newGroup()];
-    activeGroup = Math.max(0, Math.min(activeGroup, groups.length - 1));
-    syncActive();
+    if (removed) {
+      const sibling = groups.find((o, j) => o.row === removed.row && j !== gi);
+      if (sibling) sibling.size += removed.size;
+      groups.splice(gi, 1);
+    }
+    normalizeLayout();
     renderGroups(); renderTree();
   }
   if (action === "float") {
@@ -748,7 +820,8 @@ function renderTabsFor(gi) {
   const g = groups[gi];
   const actions = `<div class="gactions">
       ${g.active ? `<span class="gact" data-gact="float" title="Move into Floating Window">⇱</span>` : ""}
-      <span class="gact" data-gact="split" title="Split Editor (Ctrl+\\)">${SPLIT_ICON}</span>
+      <span class="gact" data-gact="split" title="Split Editor Right (Ctrl+\\)">${SPLIT_ICON}</span>
+      <span class="gact" data-gact="splitdown" title="Split Editor Down (Ctrl+K Ctrl+\\)">${SPLIT_DOWN_ICON}</span>
       ${groups.length > 1 ? `<span class="gact" data-gact="closegroup" title="Close Group">✕</span>` : ""}
     </div>`;
   $(`tabs${gi}`).innerHTML = g.tabs.map(p => {
@@ -969,9 +1042,7 @@ function closeTab(path, gi = activeGroup) {
   g.tabs = g.tabs.filter(p => p !== path);
   if (g.active === path) g.active = g.tabs[g.tabs.length - 1] || null;
   if (groups.length > 1 && g.tabs.length === 0) {
-    groups.splice(gi, 1);
-    activeGroup = 0;
-    syncActive();
+    normalizeLayout();
     renderGroups(); renderTree();
     return;
   }
@@ -1046,7 +1117,7 @@ function setTitle() {
   $("ws-name").textContent = folderName ? folderName.toUpperCase() : "No Folder Opened";
 }
 
-function resetGroups() { groups = [{ tabs: [], active: null }]; activeGroup = 0; syncActive(); }
+function resetGroups() { groups = [newGroup()]; rowSizes = [1]; activeGroup = 0; syncActive(); }
 
 function replaceWorkspace(name, entries) {
   files.clear(); fileHandles.clear(); resetGroups(); collapsed.clear();
@@ -1249,7 +1320,8 @@ async function menuItems(which) {
     { label: "Extensions: Packs", action: () => showView("ext") },
     { label: "detcode Engine", action: () => showView("detcode") },
     "-",
-    { label: "Split Editor", hint: "Ctrl+\\", disabled: !active, action: splitEditor },
+    { label: "Split Editor Right", hint: "Ctrl+\\", disabled: !active, action: splitEditor },
+    { label: "Split Editor Down", hint: "Ctrl+K Ctrl+\\", disabled: !active, action: splitDown },
     { label: "Move Active Tab into Floating Window", disabled: !active,
       action: () => floatTab(active, activeGroup) },
     "-",
@@ -1744,7 +1816,7 @@ const HELP = [
   ["query <question>", "knowledge web: evidence with citations"],
   ["mint <kw1,kw2>", "mint the workspace as a pack (its tests must pass)"],
   ["test", "run the workspace tests server-side"],
-  ["split", "split the editor right (also Ctrl+\\; repeat for N panes)"],
+  ["split / split down", "split right (Ctrl+\\) or down (Ctrl+K Ctrl+\\) — compose into grids"],
   ["float", "move the active tab into a floating window (or drag it out)"],
   ["save / save project", "write buffers back to disk (also Ctrl+S)"],
   ["<anything else>", "English, acting on the active file (ask/fix/explain/...)"],
@@ -1764,7 +1836,8 @@ async function runCommand(raw) {
   if (!cmd) return;
   if (cmd === "help") { termPrint(HELP); return; }
   if (cmd === "clear") { $("term-out").innerHTML = ""; return; }
-  if (cmd === "split") { splitEditor(); return; }
+  if (cmd === "split" || cmd === "split right") { splitEditor(); return; }
+  if (cmd === "split down") { splitDown(); return; }
   if (cmd === "float") {
     if (active) floatTab(active, activeGroup);
     else termPrint('<span class="err">no active file to float</span>');
@@ -1922,7 +1995,8 @@ function quickCandidates(value) {
       ["detcode: Query Knowledge Web", "query "],
       ["detcode: Mint This Project", "mint "],
       ["detcode: Save Project As", "save project"],
-      ["View: Split Editor", "split"],
+      ["View: Split Editor Right", "split"],
+      ["View: Split Editor Down", "split down"],
       ["View: Float Active Tab", "float"],
       ["File: Save", "save"],
       ["Help: Show Terminal Commands", "help"],
@@ -1991,7 +2065,7 @@ document.addEventListener("keydown", e => {
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); showView("explorer"); return; }
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "f") { e.preventDefault(); showView("search"); return; }
   if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); openQuick("@"); return; }
-  if (e.ctrlKey && e.key === "\\") { e.preventDefault(); splitEditor(); return; }
+  if (e.ctrlKey && e.key === "\\" && !chordPending) { e.preventDefault(); splitEditor(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "j") { e.preventDefault(); togglePanel(); return; }
   if (e.ctrlKey && e.key.toLowerCase() === "s" && !chordPending) { e.preventDefault(); saveActive(); return; }
   if (e.ctrlKey && e.key === "`") {
@@ -2008,6 +2082,12 @@ document.addEventListener("keydown", e => {
   if (chordPending && e.ctrlKey && e.key.toLowerCase() === "o") {
     chordPending = false; e.preventDefault();
     openFolder();
+    return;
+  }
+  if (chordPending && e.ctrlKey && e.key === "\\") {
+    chordPending = false; e.preventDefault();
+    splitDown();
+    return;
   }
   if (e.key === "Escape") { closeDropdown(); closeQuick(); }
 });

@@ -188,6 +188,65 @@ class AdviseTests(unittest.TestCase):
         self.assertEqual(len(runs), 1)
 
 
+class AdviseWorkspaceTests(unittest.TestCase):
+    SOURCES = {
+        "app/a.py": "import os\n\n\ndef f(items=[]):\n    return items\n",
+        "app/b.py": "def g(x):\n    return x == None\n",
+        "app/clean.py": "def h(x):\n    return x\n",
+        "README.md": "not python",
+    }
+
+    def test_aggregates_across_files_with_paths(self):
+        answer = knowledge.advise_all(self.SOURCES)
+        self.assertIn("Reviewed 3 file(s)", answer.text)
+        self.assertIn("1 file(s) clean", answer.text)
+        self.assertIn("app/a.py:L", answer.text)
+        self.assertIn("app/b.py:L", answer.text)
+        self.assertIn("Mutable default arguments", answer.text)
+        self.assertIn("Comparing with None", answer.text)
+        self.assertEqual(answer.report["files"], 3)
+
+    def test_clean_workspace(self):
+        answer = knowledge.advise_all({"x.py": "def f(x):\n    return x\n"})
+        self.assertIn("no problems detected anywhere", answer.text)
+
+    def test_no_python_refused(self):
+        with self.assertRaises(KnowledgeError):
+            knowledge.advise_all({"README.md": "hello"})
+
+    def test_service_tool_with_files(self):
+        resp = run_request({"tool": "advise", "files": self.SOURCES})
+        self.assertTrue(resp["ok"])
+        self.assertIn("lesson(s)", resp["output"])
+
+    def test_deterministic(self):
+        runs = {knowledge.advise_all(self.SOURCES).text for _ in range(5)}
+        self.assertEqual(len(runs), 1)
+
+
+class StudyExportTests(unittest.TestCase):
+    def test_markdown_shape(self):
+        from detcode.cli import _study_markdown
+
+        records = [
+            {"question": "how do X", "keywords": ["x"], "status": "open", "answered_by": None},
+            {"question": "how do Y", "keywords": ["y"], "status": "answered",
+             "answered_by": "taught y_thing"},
+        ]
+        text = _study_markdown(records)
+        self.assertIn("# detcode study queue", text)
+        self.assertIn("- [ ] how do X  — keywords: x", text)
+        self.assertIn("- [x] how do Y  — taught y_thing", text)
+        self.assertIn("## Open (1)", text)
+        self.assertIn("## Answered (1)", text)
+
+    def test_empty_queue_markdown(self):
+        from detcode.cli import _study_markdown
+
+        text = _study_markdown([])
+        self.assertIn("(none — every question has an answer)", text)
+
+
 class ExperienceClosesQuestionsTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="detcode_exp_")

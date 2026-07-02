@@ -1029,6 +1029,24 @@ async function runCommand(raw) {
     return;
   }
 
+  const adviseWorkspace = /^(?:advise|review)\s+(?:workspace|all|everything)$/i.test(cmd)
+    || (/^(?:advise|review(?:\s+this\s+file)?)$/i.test(cmd) && !(active && active.endsWith(".py")));
+  if (adviseWorkspace) {
+    const map = projectFiles();
+    if (!map) {
+      termPrint('<span class="err">no workspace to review — open a folder or generate a project first</span>');
+      return;
+    }
+    try {
+      const resp = await api({ tool: "advise", files: map });
+      termPrint(resp.ok ? esc(resp.output)
+        : `<span class="err">${resp.refused ? "refused" : "error"}: ${esc(resp.error)}</span>`);
+    } catch (err) {
+      termPrint(`<span class="err">request failed: ${esc(String(err))}</span>`);
+    }
+    return;
+  }
+
   const mintMatch = /^mint\s+(.+)$/.exec(cmd);
   if (mintMatch) { await runMint(mintMatch[1].trim()); return; }
   if (cmd === "mint") {

@@ -260,11 +260,25 @@ def _cmd_ask(args) -> int:
 
 def _cmd_advise(args) -> int:
     from . import store as store_module
+    from .engines import knowledge
     from .ir import Intent
 
     store = (
         store_module.Store() if os.path.exists(store_module.DEFAULT_DB_PATH) else None
     )
+    if args.dir:
+        sources: dict = {}
+        for dirpath, dirnames, filenames in os.walk(args.dir):
+            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+            for fname in sorted(filenames):
+                if fname.endswith(".py"):
+                    full = os.path.join(dirpath, fname)
+                    sources[os.path.relpath(full, args.dir).replace(os.sep, "/")] = _read(full)
+        learned = knowledge.load_knowledge(store.knowledge_text()) if store else ()
+        print(knowledge.advise_all(sources, extra_entries=learned).text)
+        return 0
+    if not args.file:
+        raise knowledge.KnowledgeError("give --file for one file or --dir for a workspace")
     outcome = planner.run(Intent.of("advise"), _read(args.file), store)
     print(outcome.output)
     return 0
@@ -296,10 +310,45 @@ def _cmd_learn(args) -> int:
     return 0
 
 
+def _study_markdown(records: list[dict]) -> str:
+    """The study queue as a committable reading list (deterministic)."""
+    open_items = [r for r in records if r["status"] == "open"]
+    answered = [r for r in records if r["status"] != "open"]
+    lines = [
+        "# detcode study queue",
+        "",
+        "Questions the engine refused to guess at. Close one by learning:",
+        "",
+        "```bash",
+        'detcode learn --topic "..." --keywords a,b --source URL --guidance "..."',
+        "```",
+        "",
+        f"## Open ({len(open_items)})",
+        "",
+    ]
+    if open_items:
+        for record in open_items:
+            keywords = ", ".join(record["keywords"])
+            lines.append(f"- [ ] {record['question']}  — keywords: {keywords}")
+    else:
+        lines.append("(none — every question has an answer)")
+    lines.extend(["", f"## Answered ({len(answered)})", ""])
+    if answered:
+        for record in answered:
+            lines.append(f"- [x] {record['question']}  — {record['answered_by']}")
+    else:
+        lines.append("(none yet)")
+    return "\n".join(lines) + "\n"
+
+
 def _cmd_study(args) -> int:
     from . import store as store_module
 
     records = store_module.Store().open_questions()
+    if args.out:
+        _write(args.out, _study_markdown(records))
+        print(f"{args.out}: study queue exported ({len(records)} question(s))", file=sys.stderr)
+        return 0
     if not records:
         print("study queue is empty — every question so far has an answer")
         return 0
@@ -712,8 +761,11 @@ def build_parser() -> argparse.ArgumentParser:
     ak.add_argument("question", help='e.g. "how should I store money amounts?"')
     ak.set_defaults(handler=_cmd_ask)
 
-    av = sub.add_parser("advise", help="review a file: diagnostics paired with lessons")
-    av.add_argument("--file", required=True, help="Python source file")
+    av = sub.add_parser(
+        "advise", help="review a file or workspace: diagnostics paired with lessons"
+    )
+    av.add_argument("--file", help="Python source file")
+    av.add_argument("--dir", help="review every .py under this directory instead")
     av.set_defaults(handler=_cmd_advise)
 
     ln = sub.add_parser(
@@ -728,6 +780,7 @@ def build_parser() -> argparse.ArgumentParser:
     ln.set_defaults(handler=_cmd_learn)
 
     st = sub.add_parser("study", help="open questions the engine could not answer yet")
+    st.add_argument("--out", help="export a markdown reading list to this path")
     st.set_defaults(handler=_cmd_study)
 
     kn = sub.add_parser("knowledge", help="inspect and share the knowledge base")

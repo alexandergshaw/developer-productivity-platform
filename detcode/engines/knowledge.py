@@ -564,6 +564,91 @@ def advise(source: str, extra_entries: tuple = ()) -> Answer:
     return Answer("advise", "\n".join(lines), None, report)
 
 
+def advise_all(sources: dict[str, str], extra_entries: tuple = ()) -> Answer:
+    """Workspace-wide advise: every .py file's findings, paired with lessons.
+
+    Deterministic: files in sorted path order, findings by line; lessons
+    keyed by topic accumulate every location that triggered them.
+    """
+    from .diagnose import diagnostics
+
+    candidates = [(e, "builtin") for e in BUILTIN_KNOWLEDGE]
+    candidates += [(e, "learned") for e in extra_entries]
+
+    located: list[tuple[str, dict]] = []
+    clean = 0
+    scanned = 0
+    for path in sorted(sources):
+        if not path.endswith(".py"):
+            continue
+        scanned += 1
+        items = diagnostics(sources[path])
+        if not items:
+            clean += 1
+        located.extend((path, item) for item in items)
+
+    if scanned == 0:
+        raise KnowledgeError("no .py files to review")
+    if not located:
+        report = provenance("advise", RULE_VERSION, files=scanned, findings=0, lessons=0)
+        return Answer(
+            "advise",
+            f"Reviewed {scanned} file(s): no problems detected anywhere.",
+            None,
+            report,
+        )
+
+    lessons: list[tuple[str, dict, list]] = []  # (topic, entry, [(path, item)])
+    unmatched: list[tuple[str, dict]] = []
+    for path, item in located:
+        finding_words = _words(item["message"])
+        scored = sorted(
+            ((entry, _score(entry, finding_words)) for entry, _o in candidates),
+            key=lambda t: (-t[1], t[0]["topic"]),
+        )
+        if scored and scored[0][1] > 0:
+            entry = scored[0][0]
+            existing = next((l for l in lessons if l[0] == entry["topic"]), None)
+            if existing:
+                existing[2].append((path, item))
+            else:
+                lessons.append((entry["topic"], entry, [(path, item)]))
+        else:
+            unmatched.append((path, item))
+
+    lines = [
+        f"Reviewed {scanned} file(s): {len(located)} finding(s), "
+        f"{len(lessons)} lesson(s), {clean} file(s) clean."
+    ]
+    for topic, entry, findings in lessons:
+        lines.append("")
+        lines.append(f"## {topic}  ({len(findings)} occurrence(s))")
+        for path, item in findings[:8]:
+            lines.append(f"  {path}:L{item['line']}: {item['message']}")
+        if len(findings) > 8:
+            lines.append(f"  ... and {len(findings) - 8} more")
+        lines.append("")
+        lines.append(entry["guidance"])
+        if entry["sources"]:
+            lines.append(f"Source: {entry['sources'][0]}")
+        if any(item["fix"] for _p, item in findings):
+            fix = next(item["fix"] for _p, item in findings if item["fix"])
+            lines.append(f"Quick fix available per file: {fix}")
+    if unmatched:
+        lines.append("")
+        lines.append("Other findings (no lesson on file yet):")
+        lines.extend(
+            f"  {path}:L{item['line']}: {item['message']}" for path, item in unmatched
+        )
+
+    report = provenance(
+        "advise", RULE_VERSION,
+        files=scanned, findings=len(located), lessons=len(lessons),
+        topics=[t for t, _e, _f in lessons],
+    )
+    return Answer("advise", "\n".join(lines), None, report)
+
+
 def learn(entry: dict, knowledge_text: str | None = None) -> tuple[str, dict]:
     """Validate + verify an entry; return (new knowledge text, report)."""
     validated = _validate_entry(entry)

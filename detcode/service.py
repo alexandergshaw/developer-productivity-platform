@@ -181,6 +181,17 @@ def run_request(req, store=None) -> dict:
                 suffix = f"  [answered by: {r['answered_by']}]" if r["answered_by"] else ""
                 lines.append(f"{mark} {r['question']}{suffix}")
             return _text("\n".join(lines), {"open": len(records)})
+        if tool == "advise":
+            from .engines import knowledge
+
+            learned = (
+                knowledge.load_knowledge(store.knowledge_text()) if store is not None else ()
+            )
+            if isinstance(req.get("files"), dict):
+                answer = knowledge.advise_all(req["files"], extra_entries=learned)
+            else:
+                answer = knowledge.advise(str(req.get("source") or ""), extra_entries=learned)
+            return _text(answer.text, answer.report)
         if tool == "complete":
             from .engines import complete as complete_engine
 

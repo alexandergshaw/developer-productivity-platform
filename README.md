@@ -135,8 +135,12 @@ everything is hash-verified out of the database.
 ```bash
 detcode ask "should I use floats for money?"   # guidance with receipts
 detcode advise --file app.py                   # your diagnostics, paired with lessons
+detcode advise --dir myproject                 # whole-workspace review, by topic
 detcode study                                  # questions the engine couldn't answer
+detcode study --out reading-list.md            # committable markdown checklist
 detcode learn --topic "..." --keywords a,b --source URL --guidance "..."
+detcode knowledge seeds                        # curated collections: testing,
+detcode knowledge seed git-workflow            #   git-workflow, api-design
 detcode knowledge list | export | import       # share it, fully re-verified
 ```
 

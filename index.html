@@ -3,233 +3,487 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>detcode — a deterministic coding assistant</title>
+<title>detcode — deterministic coding assistant</title>
 <style>
   :root {
-    --bg: #0f1117; --panel: #171a23; --border: #2a2f3d;
-    --text: #e2e5ec; --dim: #8b91a0; --accent: #5eead4; --red: #f0938c;
-    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+    --ab-bg: #333333; --ab-fg: #858585; --ab-active: #ffffff;
+    --sb-bg: #252526; --sb-fg: #cccccc; --sb-head: #bbbbbb;
+    --ed-bg: #1e1e1e; --ed-fg: #d4d4d4; --gutter: #858585;
+    --tab-bg: #2d2d2d; --tab-active: #1e1e1e; --tab-fg: #969696; --tab-active-fg: #ffffff;
+    --term-bg: #181818; --term-fg: #cccccc;
+    --status-bg: #007acc; --status-fg: #ffffff;
+    --border: #3c3c3c; --hover: #2a2d2e; --select: #37373d;
+    --accent: #0e639c; --accent-hover: #1177bb;
+    --red: #f48771; --green: #89d185; --yellow: #e5c07b;
+    --kw: #569cd6; --str: #ce9178; --com: #6a9955; --num: #b5cea8;
+    --fn: #dcdcaa; --dec: #d7ba7d; --cls: #4ec9b0;
+    --mono: "Cascadia Code", ui-monospace, Consolas, "Courier New", monospace;
+    --ui: "Segoe UI", system-ui, -apple-system, sans-serif;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; overflow: hidden; }
   body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid; font-family: var(--ui); font-size: 13px; color: var(--ed-fg);
+    grid-template-columns: 48px 260px 1fr;
+    grid-template-rows: 1fr 220px 22px;
+    grid-template-areas: "ab sidebar main" "ab sidebar term" "status status status";
+    background: var(--ed-bg);
   }
-  main { max-width: 880px; margin: 0 auto; padding: 40px 20px 80px; }
-  h1 { font-size: 26px; margin: 0 0 4px; }
-  h1 span { color: var(--accent); }
-  .sub { color: var(--dim); margin: 0 0 28px; }
-  nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
-  nav button {
-    background: var(--panel); color: var(--dim); border: 1px solid var(--border);
-    border-radius: 8px; padding: 7px 14px; font-size: 14px; cursor: pointer;
+
+  #activitybar { grid-area: ab; background: var(--ab-bg); display: flex; flex-direction: column; align-items: center; padding-top: 4px; }
+  #activitybar button {
+    width: 48px; height: 44px; background: none; border: none; color: var(--ab-fg);
+    font-size: 20px; cursor: pointer; border-left: 2px solid transparent;
   }
-  nav button.on { color: var(--text); border-color: var(--accent); }
-  label { display: block; color: var(--dim); font-size: 13px; margin: 14px 0 4px; }
-  input[type=text], textarea {
-    width: 100%; background: var(--panel); color: var(--text);
-    border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
-    font-family: var(--mono); font-size: 13.5px;
+  #activitybar button.on { color: var(--ab-active); border-left-color: var(--ab-active); }
+
+  #sidebar { grid-area: sidebar; background: var(--sb-bg); color: var(--sb-fg); overflow-y: auto; border-right: 1px solid var(--border); }
+  .sb-title { padding: 10px 16px 6px; font-size: 11px; letter-spacing: .8px; color: var(--sb-head); }
+  .sb-section { padding: 0 8px 12px; }
+  .sb-btn {
+    display: block; width: 100%; margin: 4px 0; padding: 5px 10px; text-align: left;
+    background: var(--accent); color: #fff; border: none; border-radius: 2px; cursor: pointer; font-size: 12.5px;
   }
-  textarea { min-height: 130px; resize: vertical; }
-  .hint { color: var(--dim); font-size: 12.5px; margin-top: 4px; }
-  #run {
-    margin-top: 18px; background: var(--accent); color: #08251f; border: 0;
-    border-radius: 8px; padding: 10px 26px; font-size: 15px; font-weight: 600;
-    cursor: pointer;
+  .sb-btn:hover { background: var(--accent-hover); }
+  .sb-btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--sb-fg); font-family: var(--mono); font-size: 11.5px; }
+  .sb-btn.ghost:hover { background: var(--hover); }
+  .sb-note { padding: 6px 10px; color: #8a8a8a; font-size: 11.5px; line-height: 1.5; }
+
+  #tree { user-select: none; }
+  .node { display: flex; align-items: center; gap: 4px; padding: 2px 6px; cursor: pointer; white-space: nowrap; }
+  .node:hover { background: var(--hover); }
+  .node.active { background: var(--select); }
+  .node .twist { width: 12px; display: inline-block; color: #8a8a8a; font-size: 10px; }
+  .node .ico { width: 15px; text-align: center; font-size: 12px; }
+  .node.dirty::after { content: "●"; color: var(--yellow); margin-left: 6px; font-size: 9px; }
+
+  #main { grid-area: main; display: flex; flex-direction: column; min-width: 0; background: var(--ed-bg); }
+  #tabs { display: flex; background: var(--tab-bg); overflow-x: auto; flex: none; border-bottom: 1px solid var(--border); }
+  .tab {
+    display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; font-size: 12.5px;
+    color: var(--tab-fg); background: var(--tab-bg); border-right: 1px solid var(--border); cursor: pointer; white-space: nowrap;
   }
-  #run:disabled { opacity: .5; cursor: wait; }
-  #out {
-    margin-top: 24px; background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; padding: 14px 16px; font-family: var(--mono);
-    font-size: 13.5px; white-space: pre-wrap; word-break: break-word; display: none;
-  }
-  #out.refused { border-color: var(--red); color: var(--red); }
-  #meta { margin-top: 10px; color: var(--dim); font-size: 12.5px; font-family: var(--mono);
-    white-space: pre-wrap; display: none; }
-  footer { margin-top: 40px; color: var(--dim); font-size: 13px; }
-  footer a { color: var(--accent); }
+  .tab.on { background: var(--tab-active); color: var(--tab-active-fg); }
+  .tab .x { border: none; background: none; color: inherit; cursor: pointer; font-size: 12px; padding: 0 3px; border-radius: 3px; }
+  .tab .x:hover { background: #ffffff22; }
+  .tab .dot { color: var(--yellow); font-size: 9px; }
+
+  #editor { flex: 1; overflow: auto; font-family: var(--mono); font-size: 13px; line-height: 19px; }
+  .line { display: flex; }
+  .ln { flex: none; width: 52px; padding-right: 16px; text-align: right; color: var(--gutter); user-select: none; }
+  .lc { white-space: pre; flex: 1; }
+  .k { color: var(--kw); } .s { color: var(--str); } .c { color: var(--com); }
+  .n { color: var(--num); } .f { color: var(--fn); } .d { color: var(--dec); } .t { color: var(--cls); }
+  #welcome { padding: 40px 48px; color: #9a9a9a; font-size: 13.5px; line-height: 2; max-width: 640px; }
+  #welcome h1 { color: var(--ed-fg); font-weight: 400; font-size: 24px; margin-bottom: 12px; }
+  #welcome code { font-family: var(--mono); background: #ffffff12; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+
+  #terminal { grid-area: term; background: var(--term-bg); border-top: 1px solid var(--border); display: flex; flex-direction: column; font-family: var(--mono); font-size: 12.5px; }
+  #term-head { flex: none; padding: 4px 14px; font-family: var(--ui); font-size: 11px; letter-spacing: .8px; color: var(--sb-head); border-bottom: 1px solid #ffffff14; }
+  #term-head span { border-bottom: 1px solid var(--ab-active); color: var(--ab-active); padding-bottom: 3px; }
+  #term-out { flex: 1; overflow-y: auto; padding: 6px 14px; white-space: pre-wrap; word-break: break-word; color: var(--term-fg); }
+  #term-out .tp { color: var(--green); }
+  #term-out .err { color: var(--red); }
+  #term-out .ok { color: var(--green); }
+  #term-out .dim { color: #8a8a8a; }
+  #term-row { flex: none; display: flex; align-items: center; padding: 4px 14px 8px; gap: 8px; }
+  #term-row .tp { color: var(--green); }
+  #term-in { flex: 1; background: none; border: none; outline: none; color: var(--term-fg); font: inherit; }
+
+  #status { grid-area: status; background: var(--status-bg); color: var(--status-fg); display: flex; align-items: center; padding: 0 12px; font-size: 12px; gap: 16px; }
+  #status .right { margin-left: auto; display: flex; gap: 16px; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #424242; }
+  ::-webkit-scrollbar-track { background: transparent; }
 </style>
 </head>
 <body>
-<main>
-  <h1>det<span>code</span></h1>
-  <p class="sub">An LLM-style coding assistant with no LLM: deterministic, reproducible,
-  auditable — and honest enough to refuse what it can't do safely.</p>
+  <nav id="activitybar" aria-label="Activity bar">
+    <button id="ab-explorer" class="on" title="Explorer">🗂</button>
+    <button id="ab-detcode" title="detcode engine">🤖</button>
+  </nav>
 
-  <nav id="tabs"></nav>
-  <div id="fields"></div>
-  <button id="run">Run</button>
-  <div id="out"></div>
-  <div id="meta"></div>
+  <aside id="sidebar">
+    <div id="view-explorer">
+      <div class="sb-title">EXPLORER</div>
+      <div class="sb-section">
+        <button class="sb-btn" id="open-folder">Open Folder…</button>
+        <input type="file" id="folder-input" webkitdirectory multiple hidden>
+      </div>
+      <div id="tree"></div>
+      <div class="sb-note" id="tree-note">No folder open. Load one, or generate a project in the terminal below: <br><code style="font-family:var(--mono)">new "a resume tailorer"</code></div>
+    </div>
+    <div id="view-detcode" hidden>
+      <div class="sb-title">DETCODE ENGINE</div>
+      <div class="sb-note">Quick commands — click to place in the terminal, Enter to run. Commands act on the active editor file.</div>
+      <div class="sb-section" id="quick-cmds"></div>
+      <div class="sb-title">GRAMMAR</div>
+      <div class="sb-note" id="grammar-note">Deterministic, never guesses: unknown commands are refused with the closest supported form.</div>
+    </div>
+  </aside>
 
-  <footer>
-    Same input &rarr; byte-identical output, every time. Refusals are deliberate:
-    anything that can't be proven safe is rejected, never guessed.
-    Source on <a href="https://github.com/alexandergshaw/developer-productivity-platform">GitHub</a>.
+  <main id="main">
+    <div id="tabs" role="tablist"></div>
+    <div id="editor"></div>
+  </main>
+
+  <section id="terminal" aria-label="detcode terminal">
+    <div id="term-head"><span>TERMINAL — detcode</span></div>
+    <div id="term-out"></div>
+    <div id="term-row">
+      <span class="tp">detcode&gt;</span>
+      <input id="term-in" autocomplete="off" spellcheck="false" placeholder='try: new "a resume tailorer"   ·   help'>
+    </div>
+  </section>
+
+  <footer id="status">
+    <span>⚡ detcode <span id="st-version"></span></span>
+    <span>deterministic · same input, same output</span>
+    <span class="right">
+      <span id="st-file"></span>
+      <span id="st-lines"></span>
+    </span>
   </footer>
-</main>
 
 <script>
-const TABS = [
-  {
-    id: "ask", name: "Ask in English",
-    fields: [
-      { key: "command", label: "Command", type: "text",
-        value: "write a function is_prime where is_prime(7) == True and is_prime(8) == False",
-        hint: "Also try: build a resume tailorer · fix area so that area(2, 3) == 6 · what does area do? · add a docstring to area · clean up · remove unused imports then document" },
-      { key: "source", label: "Source code (only needed by file-editing commands)", type: "area",
-        value: "def area(width, height):\n    return width + height\n" },
-    ],
-    build: v => ({ tool: "do", command: v.command, source: v.source || undefined }),
-  },
-  {
-    id: "new", name: "New project",
-    fields: [
-      { key: "direction", label: "Project direction", type: "text",
-        value: "a resume tailorer",
-        hint: "Also try: a teaching assistant app · a flashcard study tool · an invoice reconciliation tool (generic skeleton). Every decision detcode makes is recorded in the output." },
-    ],
-    build: v => ({ tool: "new", direction: v.direction }),
-  },
-  {
-    id: "synth", name: "Synthesize",
-    fields: [
-      { key: "spec", label: "Examples spec (JSON)", type: "area", json: true,
-        value: JSON.stringify({ name: "full_name", examples: [
-          { in: ["ada", "lovelace"], out: "ada lovelace" },
-          { in: ["alan", "turing"], out: "alan turing" } ] }, null, 2),
-        hint: "The function is searched for, not guessed — examples are the spec." },
-    ],
-    build: v => ({ tool: "synth", spec: v.spec }),
-  },
-  {
-    id: "repair", name: "Repair",
-    fields: [
-      { key: "source", label: "Buggy source", type: "area",
-        value: "def area(w, h):\n    return w + h\n" },
-      { key: "spec", label: "Tests it must pass (JSON)", type: "area", json: true,
-        value: JSON.stringify({ function: "area", examples: [
-          { in: [2, 3], out: 6 }, { in: [4, 5], out: 20 } ] }, null, 2) },
-    ],
-    build: v => ({ tool: "repair", source: v.source, spec: v.spec }),
-  },
-  {
-    id: "scaffold", name: "Scaffold",
-    fields: [
-      { key: "spec", label: "Model spec (JSON)", type: "area", json: true,
-        value: JSON.stringify({ enums: [{ name: "Status", members: ["ACTIVE", "CLOSED"] }],
-          dataclasses: [{ name: "User", frozen: true, fields: [
-            { name: "id", type: "int" }, { name: "status", type: "Status", default: "Status.ACTIVE" } ],
-            methods: ["to_dict", "from_dict"] }] }, null, 2) },
-    ],
-    build: v => ({ tool: "scaffold", spec: v.spec }),
-  },
-  {
-    id: "gentest", name: "Generate tests",
-    fields: [
-      { key: "spec", label: "Test spec (JSON)", type: "area", json: true,
-        value: JSON.stringify({ function: "area", source: "def area(w, h):\n    return w * h\n",
-          examples: [{ in: [2, 3], out: 6 }, { in: [4, 5], out: 20 }] }, null, 2) },
-    ],
-    build: v => ({ tool: "gentest", spec: v.spec }),
-  },
-  {
-    id: "explain", name: "Explain",
-    fields: [
-      { key: "source", label: "Source code", type: "area",
-        value: "def apply_discount(price, percent=10):\n    \"\"\"Apply a percentage discount.\"\"\"\n    if percent < 0 or percent > 100:\n        raise ValueError(\"bad percent\")\n    return price - price * percent // 100\n" },
-      { key: "func", label: "Function name (blank = whole module)", type: "text", value: "apply_discount" },
-    ],
-    build: v => ({ tool: "explain", source: v.source, func: v.func || undefined }),
-  },
-];
+"use strict";
+// ---------- state ----------
+const files = new Map();   // path -> { content, dirty, generated }
+let tabs = [];             // open paths
+let active = null;         // active path or null (welcome)
+const collapsed = new Set();
+let history = [], hIdx = 0;
 
-const tabsEl = document.getElementById("tabs");
-const fieldsEl = document.getElementById("fields");
-const outEl = document.getElementById("out");
-const metaEl = document.getElementById("meta");
-const runBtn = document.getElementById("run");
-let active = TABS[0];
-const saved = {};
+const $ = id => document.getElementById(id);
+const esc = s => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-function show(tab) {
-  active = tab;
-  [...tabsEl.children].forEach(b => b.classList.toggle("on", b.dataset.id === tab.id));
-  fieldsEl.innerHTML = "";
-  for (const f of tab.fields) {
-    const label = document.createElement("label");
-    label.textContent = f.label;
-    fieldsEl.appendChild(label);
-    const el = f.type === "text"
-      ? Object.assign(document.createElement("input"), { type: "text" })
-      : document.createElement("textarea");
-    el.value = saved[tab.id + "." + f.key] ?? f.value;
-    el.dataset.key = f.key;
-    el.addEventListener("input", () => { saved[tab.id + "." + f.key] = el.value; });
-    fieldsEl.appendChild(el);
-    if (f.hint) {
-      const hint = document.createElement("div");
-      hint.className = "hint";
-      hint.textContent = f.hint;
-      fieldsEl.appendChild(hint);
+// ---------- python highlighter (line-state machine for triple quotes) ----------
+const PY_KW = new Set(("def class return if elif else for while import from as with try except finally raise " +
+  "pass break continue lambda yield global nonlocal assert del in is not and or None True False async await self cls").split(" "));
+
+function highlightPython(text) {
+  const out = []; let triple = null;
+  for (const line of text.split("\n")) {
+    let html = "", i = 0, prevWord = "";
+    if (triple) {
+      const idx = line.indexOf(triple);
+      if (idx >= 0) { html += `<span class="s">${esc(line.slice(0, idx + 3))}</span>`; i = idx + 3; triple = null; }
+      else { out.push(`<span class="s">${esc(line)}</span>`); continue; }
     }
-  }
-  outEl.style.display = "none";
-  metaEl.style.display = "none";
-}
-
-for (const tab of TABS) {
-  const b = document.createElement("button");
-  b.textContent = tab.name;
-  b.dataset.id = tab.id;
-  b.addEventListener("click", () => show(tab));
-  tabsEl.appendChild(b);
-}
-show(TABS[0]);
-
-function render(text, refused, report) {
-  outEl.style.display = "block";
-  outEl.classList.toggle("refused", refused);
-  outEl.textContent = text;
-  if (report) {
-    metaEl.style.display = "block";
-    metaEl.textContent = "provenance: " + JSON.stringify(report);
-  } else {
-    metaEl.style.display = "none";
-  }
-}
-
-runBtn.addEventListener("click", async () => {
-  const values = {};
-  for (const el of fieldsEl.querySelectorAll("[data-key]")) {
-    const spec = active.fields.find(f => f.key === el.dataset.key);
-    if (spec.json) {
-      try { values[el.dataset.key] = JSON.parse(el.value); }
-      catch (e) { render("Invalid JSON in “" + spec.label + "”: " + e.message, true, null); return; }
-    } else {
-      values[el.dataset.key] = el.value;
+    while (i < line.length) {
+      const ch = line[i];
+      if (ch === "#") { html += `<span class="c">${esc(line.slice(i))}</span>`; break; }
+      const three = line.slice(i, i + 3);
+      if (three === '"""' || three === "'''") {
+        const close = line.indexOf(three, i + 3);
+        if (close >= 0) { html += `<span class="s">${esc(line.slice(i, close + 3))}</span>`; i = close + 3; }
+        else { html += `<span class="s">${esc(line.slice(i))}</span>`; triple = three; i = line.length; }
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        let j = i + 1;
+        while (j < line.length && line[j] !== ch) { if (line[j] === "\\") j++; j++; }
+        html += `<span class="s">${esc(line.slice(i, Math.min(j + 1, line.length)))}</span>`; i = j + 1; continue;
+      }
+      if (ch === "@" && /^@[A-Za-z_]/.test(line.slice(i))) {
+        const d = /^@[A-Za-z_][\w.]*/.exec(line.slice(i));
+        html += `<span class="d">${esc(d[0])}</span>`; i += d[0].length; continue;
+      }
+      const word = /^[A-Za-z_][A-Za-z0-9_]*/.exec(line.slice(i));
+      if (word) {
+        const w = word[0];
+        if (PY_KW.has(w)) html += `<span class="k">${w}</span>`;
+        else if (prevWord === "def") html += `<span class="f">${w}</span>`;
+        else if (prevWord === "class") html += `<span class="t">${w}</span>`;
+        else html += esc(w);
+        prevWord = w; i += w.length; continue;
+      }
+      const num = /^\d[\d_]*(\.\d+)?/.exec(line.slice(i));
+      if (num) { html += `<span class="n">${num[0]}</span>`; i += num[0].length; continue; }
+      html += esc(ch); i++;
     }
+    out.push(html);
   }
-  runBtn.disabled = true;
-  try {
-    const res = await fetch("/api/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(active.build(values)),
+  return out;
+}
+
+// ---------- editor ----------
+function renderEditor() {
+  const ed = $("editor");
+  if (!active || !files.has(active)) {
+    ed.innerHTML = `<div id="welcome">
+      <h1>detcode</h1>
+      An LLM-style coding assistant with no LLM — deterministic, auditable, honest about refusals.<br><br>
+      <b>Open a folder</b> from the Explorer to browse code, then talk to the engine in the terminal:<br>
+      <code>new "a resume tailorer"</code> — generate a whole project into the Explorer<br>
+      <code>explain compute</code> · <code>clean up</code> · <code>add a docstring to area</code> — act on the active file<br>
+      <code>write a function is_prime where is_prime(7) == True</code> — no file needed<br><br>
+      Engine edits apply to the in-memory buffer and mark the tab <span style="color:var(--yellow)">●</span> modified.
+    </div>`;
+    $("st-file").textContent = ""; $("st-lines").textContent = "";
+    return;
+  }
+  const content = files.get(active).content;
+  const lines = active.endsWith(".py") ? highlightPython(content) : content.split("\n").map(esc);
+  ed.innerHTML = lines.map((l, i) =>
+    `<div class="line"><span class="ln">${i + 1}</span><span class="lc">${l || " "}</span></div>`).join("");
+  $("st-file").textContent = active;
+  $("st-lines").textContent = `${content.split("\n").length} lines`;
+}
+
+function renderTabs() {
+  $("tabs").innerHTML = tabs.map(p => {
+    const name = p.split("/").pop();
+    const dirty = files.get(p)?.dirty ? '<span class="dot">●</span>' : "";
+    return `<div class="tab ${p === active ? "on" : ""}" data-p="${esc(p)}" role="tab">
+      <span>${esc(name)}</span>${dirty}<button class="x" data-x="${esc(p)}" title="Close">✕</button></div>`;
+  }).join("");
+}
+
+function openFile(path) {
+  if (!files.has(path)) return;
+  if (!tabs.includes(path)) tabs.push(path);
+  active = path;
+  renderTabs(); renderTree(); renderEditor();
+}
+
+function closeTab(path) {
+  tabs = tabs.filter(p => p !== path);
+  if (active === path) active = tabs[tabs.length - 1] || null;
+  renderTabs(); renderTree(); renderEditor();
+}
+
+$("tabs").addEventListener("click", e => {
+  const x = e.target.closest("[data-x]");
+  if (x) { closeTab(x.dataset.x); e.stopPropagation(); return; }
+  const t = e.target.closest("[data-p]");
+  if (t) openFile(t.dataset.p);
+});
+
+// ---------- tree ----------
+function buildTree() {
+  const root = {};
+  for (const path of [...files.keys()].sort()) {
+    let node = root;
+    const parts = path.split("/");
+    parts.forEach((part, i) => {
+      if (i === parts.length - 1) (node.__files ??= []).push({ name: part, path });
+      else node = (node[part] ??= {});
     });
-    const data = await res.json();
-    if (data.ok) {
-      render(data.output, false, data.report);
-    } else {
-      render((data.refused ? "Refused: " : "Error: ") + data.error, true, null);
+  }
+  return root;
+}
+
+function renderTree() {
+  const html = [];
+  const walk = (node, prefix, depth) => {
+    const dirs = Object.keys(node).filter(k => k !== "__files").sort();
+    for (const dir of dirs) {
+      const full = prefix + dir;
+      const isClosed = collapsed.has(full);
+      html.push(`<div class="node" data-dir="${esc(full)}" style="padding-left:${8 + depth * 12}px">
+        <span class="twist">${isClosed ? "▶" : "▼"}</span><span class="ico">📁</span>${esc(dir)}</div>`);
+      if (!isClosed) walk(node[dir], full + "/", depth + 1);
     }
-  } catch (e) {
-    render("Request failed: " + e.message, true, null);
-  } finally {
-    runBtn.disabled = false;
+    for (const f of (node.__files || [])) {
+      const cls = f.path === active ? "node active" : "node";
+      const dirty = files.get(f.path)?.dirty ? " dirty" : "";
+      const ico = f.name.endsWith(".py") ? "🐍" : f.name.endsWith(".md") ? "📘" : "📄";
+      html.push(`<div class="${cls}${dirty}" data-f="${esc(f.path)}" style="padding-left:${20 + depth * 12}px">
+        <span class="ico">${ico}</span>${esc(f.name)}</div>`);
+    }
+  };
+  walk(buildTree(), "", 0);
+  $("tree").innerHTML = html.join("");
+  $("tree-note").hidden = files.size > 0;
+}
+
+$("tree").addEventListener("click", e => {
+  const d = e.target.closest("[data-dir]");
+  if (d) {
+    const dir = d.dataset.dir;
+    collapsed.has(dir) ? collapsed.delete(dir) : collapsed.add(dir);
+    renderTree(); return;
+  }
+  const f = e.target.closest("[data-f]");
+  if (f) openFile(f.dataset.f);
+});
+
+// ---------- folder loading (in-browser; works locally and on Vercel) ----------
+const SKIP_DIRS = /(^|\/)(\.git|node_modules|__pycache__|\.venv|venv|dist|build|\.pytest_cache|\.mypy_cache)(\/|$)/;
+const TEXT_EXT = /\.(py|md|txt|json|toml|yml|yaml|js|ts|tsx|jsx|html|css|cfg|ini|csv|sh|bat|ps1|gitignore|xml|sql|rs|go|java|c|h|cpp)$/i;
+
+$("open-folder").addEventListener("click", () => $("folder-input").click());
+$("folder-input").addEventListener("change", async e => {
+  const picked = [...e.target.files]
+    .filter(f => !SKIP_DIRS.test(f.webkitRelativePath))
+    .filter(f => TEXT_EXT.test(f.name) || !f.name.includes("."))
+    .filter(f => f.size < 400_000)
+    .slice(0, 1000);
+  let loaded = 0;
+  for (const f of picked) {
+    try { files.set(f.webkitRelativePath, { content: await f.text(), dirty: false }); loaded++; }
+    catch { /* unreadable file: skip */ }
+  }
+  renderTree();
+  termPrint(`<span class="dim">loaded ${loaded} files from folder</span>`);
+  e.target.value = "";
+});
+
+// ---------- activity bar ----------
+function showView(which) {
+  $("view-explorer").hidden = which !== "explorer";
+  $("view-detcode").hidden = which !== "detcode";
+  $("ab-explorer").classList.toggle("on", which === "explorer");
+  $("ab-detcode").classList.toggle("on", which === "detcode");
+}
+$("ab-explorer").addEventListener("click", () => showView("explorer"));
+$("ab-detcode").addEventListener("click", () => showView("detcode"));
+
+// ---------- detcode quick panel ----------
+const QUICK = [
+  'new "a resume tailorer"',
+  'new "a teaching assistant app"',
+  "explain",
+  "clean up",
+  "document",
+  'write a function is_prime where is_prime(7) == True and is_prime(8) == False',
+  'fix area so that area(2, 3) == 6 and area(4, 5) == 20',
+  'generate tests for area where area(2, 3) == 6',
+  "remove unused imports then document",
+];
+$("quick-cmds").innerHTML = QUICK.map(c =>
+  `<button class="sb-btn ghost" data-cmd="${esc(c)}">${esc(c)}</button>`).join("");
+$("quick-cmds").addEventListener("click", e => {
+  const b = e.target.closest("[data-cmd]");
+  if (b) { $("term-in").value = b.dataset.cmd; $("term-in").focus(); }
+});
+
+// ---------- terminal ----------
+function termPrint(html) {
+  const out = $("term-out");
+  out.insertAdjacentHTML("beforeend", html + "\n");
+  out.scrollTop = out.scrollHeight;
+}
+
+async function api(payload) {
+  const res = await fetch("/api/run", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+function materialize(fileMap, report) {
+  const root = (report && report.package) || "project";
+  let count = 0;
+  for (const [path, content] of Object.entries(fileMap)) {
+    files.set(`${root}/${path}`, { content, dirty: false, generated: true });
+    count++;
+  }
+  collapsed.clear();
+  renderTree();
+  termPrint(`<span class="ok">✓ generated ${count} files into ${esc(root)}/</span>`);
+  for (const d of (report?.decisions || [])) termPrint(`<span class="dim">  - ${esc(d)}</span>`);
+  const readme = `${root}/README.md`;
+  if (files.has(readme)) openFile(readme);
+}
+
+const HELP = [
+  ["help", "this list"],
+  ["clear", "clear the terminal"],
+  ["ls", "list loaded files"],
+  ["open <path>", "open a file in the editor"],
+  ['new "<direction>"', "generate a project into the Explorer (e.g. new \"a resume tailorer\")"],
+  ["<anything else>", "sent to the engine as English, acting on the active file"],
+].map(([c, d]) => `  <span class="ok">${c.padEnd(22)}</span><span class="dim">${d}</span>`).join("\n");
+
+async function runCommand(raw) {
+  termPrint(`<span class="tp">detcode&gt;</span> ${esc(raw)}`);
+  const cmd = raw.trim().replace(/^detcode\s+/, "");
+  if (!cmd) return;
+  if (cmd === "help") { termPrint(HELP); return; }
+  if (cmd === "clear") { $("term-out").innerHTML = ""; return; }
+  if (cmd === "ls") {
+    termPrint([...files.keys()].sort().map(p => "  " + esc(p)).join("\n") || '<span class="dim">no files loaded</span>');
+    return;
+  }
+  if (cmd.startsWith("open ")) {
+    const path = cmd.slice(5).trim();
+    if (files.has(path)) openFile(path);
+    else termPrint(`<span class="err">no such file: ${esc(path)} (try ls)</span>`);
+    return;
+  }
+
+  const newMatch = /^new\s+(.+)$/.exec(cmd);
+  try {
+    let resp;
+    if (newMatch) {
+      const direction = newMatch[1].trim().replace(/^["']|["']$/g, "");
+      resp = await api({ tool: "new", direction });
+      if (resp.ok) { materialize(resp.files, resp.report); return; }
+    } else {
+      const source = active && files.has(active) ? files.get(active).content : undefined;
+      resp = await api({ tool: "do", command: cmd, source });
+      if (resp.ok) {
+        if (resp.files) { materialize(resp.files, stepReport(resp.report, "build")); return; }
+        if (resp.kind === "edit") {
+          if (active && files.has(active)) {
+            const changed = files.get(active).content !== resp.output;
+            files.set(active, { content: resp.output, dirty: changed });
+            renderTabs(); renderTree(); renderEditor();
+            termPrint(changed
+              ? `<span class="ok">✎ applied to ${esc(active)} (in-memory buffer)</span>`
+              : `<span class="dim">no change needed in ${esc(active)}</span>`);
+          } else {
+            termPrint(`<span class="err">this command edits a file — open one first</span>`);
+          }
+          if (resp.text) termPrint(esc(resp.text));
+        } else {
+          termPrint(esc(resp.output));
+        }
+        const rule = resp.report && (resp.report.rule || "");
+        if (rule) termPrint(`<span class="dim">  [${esc(rule)}${resp.report.entry ? ": " + esc(resp.report.entry) : ""}]</span>`);
+        return;
+      }
+    }
+    termPrint(`<span class="err">${resp.refused ? "refused" : "error"}: ${esc(resp.error)}</span>`);
+  } catch (err) {
+    termPrint(`<span class="err">request failed: ${esc(String(err))}</span>`);
+  }
+}
+
+function stepReport(report, rule) {
+  if (!report) return report;
+  if (report.rule === rule) return report;
+  for (const step of (report.steps || [])) if (step.rule === rule) return step;
+  return report;
+}
+
+$("term-in").addEventListener("keydown", e => {
+  const input = e.target;
+  if (e.key === "Enter" && input.value.trim()) {
+    history.push(input.value); hIdx = history.length;
+    const v = input.value; input.value = "";
+    runCommand(v);
+  } else if (e.key === "ArrowUp") {
+    if (hIdx > 0) { hIdx--; input.value = history[hIdx] ?? ""; }
+    e.preventDefault();
+  } else if (e.key === "ArrowDown") {
+    if (hIdx < history.length) { hIdx++; input.value = history[hIdx] ?? ""; }
+    e.preventDefault();
   }
 });
+document.addEventListener("keydown", e => {
+  if (e.ctrlKey && e.key === "`") { $("term-in").focus(); e.preventDefault(); }
+});
+
+// ---------- boot ----------
+renderEditor(); renderTree();
+termPrint('<span class="dim">detcode terminal — type help. Engine responses are deterministic and carry provenance.</span>');
+fetch("/api/run").then(r => r.json()).then(u => {
+  $("st-version").textContent = u.version || "";
+  $("grammar-note").innerHTML += "<br><br>" + (u.tools || []).map(t => `<code>${t}</code>`).join(" · ");
+}).catch(() => {});
 </script>
 </body>
 </html>

@@ -78,10 +78,15 @@ def run_request(req) -> dict:
                 resp = _edit(outcome.new_source, outcome.changed, outcome.report)
                 if outcome.output:  # a chain can both edit and generate
                     resp["text"] = outcome.output
+                if outcome.files:
+                    resp["files"] = outcome.files
                 return resp
             explain_only = all(i.operation == "explain" for i in intents)
             kind = _text if explain_only else _generated
-            return kind(outcome.output or "", outcome.report)
+            resp = kind(outcome.output or "", outcome.report)
+            if outcome.files:
+                resp["files"] = outcome.files
+            return resp
         if tool == "synth":
             r = retrieve.write_function(req.get("spec") or {})
             return _generated(r.source, r.report)
@@ -113,7 +118,9 @@ def run_request(req) -> dict:
             return _edit(r.source, r.changed, r.report)
         if tool == "new":
             project = builder.build(str(req.get("direction") or ""))
-            return _generated(builder.render(project), project.report)
+            resp = _generated(builder.render(project), project.report)
+            resp["files"] = {f.path: f.content for f in project.files}
+            return resp
         return {"ok": False, "refused": False, "error": f"unknown tool {tool!r}"}
     except REFUSALS as exc:
         return {"ok": False, "refused": True, "error": str(exc)}

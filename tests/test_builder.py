@@ -147,6 +147,16 @@ class EnglishAndServiceTests(unittest.TestCase):
         self.assertTrue(resp["ok"])
         self.assertIn("teaching_assistant/scheduler.py", resp["output"])
         self.assertEqual(resp["report"]["pack"], "teaching-assistant")
+        # Structured file map so UIs can materialize the project.
+        self.assertIn("teaching_assistant/scheduler.py", resp["files"])
+        self.assertIn("README.md", resp["files"])
+
+    def test_do_build_includes_files_map(self):
+        from detcode.service import run_request
+
+        resp = run_request({"tool": "do", "command": "build a resume tailorer"})
+        self.assertTrue(resp["ok"])
+        self.assertIn("resume_tailorer/tailor.py", resp["files"])
 
     def test_service_refuses_empty_direction(self):
         from detcode.service import run_request

@@ -34,6 +34,9 @@ class Outcome:
     output: str | None
     changed: bool
     report: dict
+    # Structured file map for project-building intents (path -> content),
+    # so UIs can materialize the project instead of parsing the text bundle.
+    files: dict | None = None
 
 
 def _needs_source(intent: Intent, source: str | None) -> str:
@@ -104,7 +107,13 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
 
     if op == "new":
         project = builder.build(intent.get("direction") or "")
-        return Outcome(None, builder.render(project), False, project.report)
+        return Outcome(
+            None,
+            builder.render(project),
+            False,
+            project.report,
+            files={f.path: f.content for f in project.files},
+        )
 
     if op == "gentest":
         spec = _spec(intent)
@@ -130,6 +139,7 @@ def run_all(intents: list[Intent], source: str | None = None) -> Outcome:
     current = source
     outputs: list[str] = []
     reports: list[dict] = []
+    files: dict = {}
     edited = False
     for intent in intents:
         outcome = run(intent, current)
@@ -139,9 +149,12 @@ def run_all(intents: list[Intent], source: str | None = None) -> Outcome:
             edited = edited or outcome.changed
         if outcome.output:
             outputs.append(outcome.output)
+        if outcome.files:
+            files.update(outcome.files)
     return Outcome(
         current if edited else None,
         "\n\n".join(outputs) if outputs else None,
         edited,
         provenance("pipeline", "1", steps=reports),
+        files=files or None,
     )

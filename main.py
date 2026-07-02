@@ -11,8 +11,20 @@ import os
 
 from detcode.determinism import TOOL_VERSION
 from detcode.service import run_request
+from detcode.store import open_default
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+_STORE = None
+
+
+def _get_store():
+    """Lazy store singleton: local runs get .detcode/detcode.db (durable);
+    read-only serverless filesystems fall back to a temp path (ephemeral)."""
+    global _STORE
+    if _STORE is None:
+        _STORE = open_default()
+    return _STORE
 
 USAGE = {
     "service": "detcode",
@@ -61,7 +73,7 @@ def app(environ, start_response) -> list[bytes]:
                 "400 Bad Request",
                 {"ok": False, "refused": False, "error": "body must be valid JSON"},
             )
-        return json_response("200 OK", run_request(request))
+        return json_response("200 OK", run_request(request, store=_get_store()))
 
     if path in ("/", "/index.html") and method in ("GET", "HEAD"):
         with open(os.path.join(ROOT, "index.html"), "rb") as fh:

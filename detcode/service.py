@@ -37,9 +37,15 @@ from .engines import (
     synth,
 )
 
+from .engines import teach as teach_engine
+from .store import StoreError
+
 REFUSALS = (
     rewrite.Unsafe,
     builder.BuildError,
+    teach_engine.TeachError,
+    teach_engine.CorpusError,
+    StoreError,
     scaffold.SpecError,
     synth.SpecError,
     synth.NoSolution,
@@ -66,14 +72,14 @@ def _text(text: str, report: dict) -> dict:
     return {"ok": True, "kind": "text", "output": text, "changed": False, "report": report}
 
 
-def run_request(req) -> dict:
+def run_request(req, store=None) -> dict:
     if not isinstance(req, dict):
         return {"ok": False, "refused": False, "error": "request must be a JSON object"}
     tool = req.get("tool")
     try:
         if tool == "do":
             intents = cnl.parse_all(str(req.get("command") or ""))
-            outcome = planner.run_all(intents, req.get("source"))
+            outcome = planner.run_all(intents, req.get("source"), store)
             if outcome.new_source is not None:
                 resp = _edit(outcome.new_source, outcome.changed, outcome.report)
                 if outcome.output:  # a chain can both edit and generate
@@ -88,7 +94,9 @@ def run_request(req) -> dict:
                 resp["files"] = outcome.files
             return resp
         if tool == "synth":
-            r = retrieve.write_function(req.get("spec") or {})
+            r = retrieve.write_function(
+                req.get("spec") or {}, extra=planner.corpus_entries(store)
+            )
             return _generated(r.source, r.report)
         if tool == "scaffold":
             r = scaffold.scaffold(req.get("spec") or {})
@@ -118,7 +126,10 @@ def run_request(req) -> dict:
             return _edit(r.source, r.changed, r.report)
         if tool == "new":
             if isinstance(req.get("plan"), dict):
-                project = builder.build_from_plan(req["plan"], web=bool(req.get("web")))
+                project = builder.build_from_plan(
+                    req["plan"], web=bool(req.get("web")),
+                    corpus=planner.corpus_entries(store),
+                )
             else:
                 project = builder.build(
                     str(req.get("direction") or ""), web=bool(req.get("web"))

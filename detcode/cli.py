@@ -31,6 +31,12 @@ from .engines import (
 )
 
 
+def _store_error():
+    from .store import StoreError
+
+    return StoreError
+
+
 def _load_corpus(path_arg: str | None) -> tuple:
     """User corpus entries, verified on load.
 
@@ -334,9 +340,19 @@ def _cmd_new(args) -> int:
 
 
 def _cmd_do(args) -> int:
+    from . import store as store_module
+
     intents = cnl.parse_all(args.command)
     before = _read(args.file) if args.file else None
-    outcome = planner.run_all(intents, before)
+    # A store only when needed: teaching requires one; an existing local DB
+    # should feed retrieval. Plain commands must not create .detcode/.
+    needs_store = any(i.operation == "teach" for i in intents)
+    store = (
+        store_module.Store()
+        if needs_store or os.path.exists(store_module.DEFAULT_DB_PATH)
+        else None
+    )
+    outcome = planner.run_all(intents, before, store)
     status = 0
     if outcome.new_source is not None:
         status = _emit(args, args.file, before, _EditResult(outcome))
@@ -513,6 +529,7 @@ def main(argv: list[str] | None = None) -> int:
         builder.BuildError,
         teach.TeachError,
         teach.CorpusError,
+        _store_error(),
         cnl.CNLError,
         planner.UnknownIntent,
         planner.MissingSource,

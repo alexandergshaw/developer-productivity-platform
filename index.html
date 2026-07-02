@@ -149,6 +149,9 @@
       <div class="sb-title">DETCODE ENGINE</div>
       <div class="sb-note">Quick commands — click to place in the terminal, Enter to run. Commands act on the active editor file.</div>
       <div class="sb-section" id="quick-cmds"></div>
+      <div class="sb-title">TEACH FROM ACTIVE FILE</div>
+      <div class="sb-note" id="teach-note">Verified functions join the corpus; every future project can retrieve them.</div>
+      <div class="sb-section" id="teach-fns"></div>
       <div class="sb-title">GRAMMAR</div>
       <div class="sb-note" id="grammar-note">Deterministic, never guesses: unknown commands are refused with the closest supported form.</div>
     </div>
@@ -253,6 +256,7 @@ function renderEditor() {
       Engine edits apply to the in-memory buffer and mark the tab <span style="color:var(--yellow)">●</span> modified.
     </div>`;
     $("st-file").textContent = ""; $("st-lines").textContent = "";
+    renderTeachList();
     return;
   }
   const content = files.get(active).content;
@@ -261,6 +265,7 @@ function renderEditor() {
     `<div class="line"><span class="ln">${i + 1}</span><span class="lc">${l || " "}</span></div>`).join("");
   $("st-file").textContent = active;
   $("st-lines").textContent = `${content.split("\n").length} lines`;
+  renderTeachList();
 }
 
 function renderTabs() {
@@ -564,6 +569,32 @@ $("quick-cmds").innerHTML = QUICK.map(c =>
 $("quick-cmds").addEventListener("click", e => {
   const b = e.target.closest("[data-cmd]");
   if (b) { $("term-in").value = b.dataset.cmd; $("term-in").focus(); }
+});
+
+// "Teach this function": top-level defs in the active buffer become one-click
+// teach commands (fill in the examples — they are the proof).
+function renderTeachList() {
+  const box = $("teach-fns");
+  if (!active || !files.has(active) || !active.endsWith(".py")) {
+    box.innerHTML = '<div class="sb-note">Open a Python file to teach from it.</div>';
+    return;
+  }
+  const names = [...files.get(active).content.matchAll(/^def\s+([A-Za-z]\w*)\s*\(/gm)]
+    .map(m => m[1]).filter(n => !n.startsWith("_")).slice(0, 20);
+  box.innerHTML = names.length
+    ? names.map(n =>
+        `<button class="sb-btn ghost" data-teach="${esc(n)}">⚡ teach ${esc(n)}</button>`).join("")
+    : '<div class="sb-note">No top-level functions in the active file.</div>';
+}
+$("teach-fns").addEventListener("click", e => {
+  const b = e.target.closest("[data-teach]");
+  if (!b) return;
+  const fn = b.dataset.teach;
+  const input = $("term-in");
+  input.value = `teach ${fn} where ${fn}(...) == ...`;
+  input.focus();
+  const start = input.value.indexOf("(...)") + 1;
+  input.setSelectionRange(start, start + 3);
 });
 
 // ---------- terminal ----------

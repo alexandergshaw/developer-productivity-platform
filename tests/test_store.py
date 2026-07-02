@@ -115,5 +115,64 @@ class TeachAllTests(unittest.TestCase):
             teach.teach_all({"m.py": "def f(x):\n    return x\n"}, ["print('no tests')"])
 
 
+class ServiceTeachTests(unittest.TestCase):
+    """The workbench path: teach through the service, retrieve through it too."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="detcode_svc_")
+        self.store = Store(os.path.join(self.dir, "detcode.db"))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_teach_in_english_then_retrieve(self):
+        from detcode.service import run_request
+
+        taught = run_request(
+            {
+                "tool": "do",
+                "command": 'teach slugify where slugify("Hello World") == "hello-world" and slugify("A  B") == "a-b"',
+                "source": SOURCE,
+            },
+            store=self.store,
+        )
+        self.assertTrue(taught["ok"], taught.get("error"))
+        self.assertIn("taught 'slugify'", taught["output"])
+        self.assertEqual(self.store.corpus_count(), 1)
+
+        # The same service now retrieves the taught function.
+        hit = run_request(
+            {
+                "tool": "do",
+                "command": 'write a function slugify where slugify("Big Idea") == "big-idea"',
+            },
+            store=self.store,
+        )
+        self.assertTrue(hit["ok"])
+        self.assertIn('"-".join', hit["output"])
+        self.assertEqual(hit["report"]["origin"], "user")
+
+    def test_teach_without_store_is_refused(self):
+        from detcode.service import run_request
+
+        resp = run_request(
+            {"tool": "do", "command": "teach f where f(1) == 1", "source": "def f(x):\n    return x\n"},
+            store=None,
+        )
+        self.assertFalse(resp["ok"])
+        self.assertTrue(resp["refused"])
+
+    def test_teach_failing_examples_refused_and_not_persisted(self):
+        from detcode.service import run_request
+
+        resp = run_request(
+            {"tool": "do", "command": 'teach slugify where slugify("x") == "WRONG"', "source": SOURCE},
+            store=self.store,
+        )
+        self.assertFalse(resp["ok"])
+        self.assertTrue(resp["refused"])
+        self.assertEqual(self.store.corpus_count(), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

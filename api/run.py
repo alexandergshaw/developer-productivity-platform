@@ -14,6 +14,16 @@ from http.server import BaseHTTPRequestHandler
 
 from detcode.service import run_request
 from detcode.determinism import TOOL_VERSION
+from detcode.store import open_default
+
+_STORE = None
+
+
+def _get_store():
+    global _STORE
+    if _STORE is None:
+        _STORE = open_default()
+    return _STORE
 
 USAGE = {
     "service": "detcode",
@@ -43,4 +53,4 @@ class handler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             self._send(400, {"ok": False, "refused": False, "error": "body must be valid JSON"})
             return
-        self._send(200, run_request(request))
+        self._send(200, run_request(request, store=_get_store()))

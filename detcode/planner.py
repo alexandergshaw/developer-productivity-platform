@@ -51,9 +51,43 @@ def _spec(intent: Intent) -> dict:
     return json.loads(intent.get("spec_json") or "{}")
 
 
-def run(intent: Intent, source: str | None = None) -> Outcome:
-    """Execute ``intent``, optionally against ``source``."""
+def corpus_entries(store) -> tuple:
+    """Verified user-corpus entries from a store (empty when storeless)."""
+    if store is None:
+        return ()
+    from .engines.teach import load_corpus
+
+    return load_corpus(store.corpus_text())
+
+
+def run(intent: Intent, source: str | None = None, store=None) -> Outcome:
+    """Execute ``intent``, optionally against ``source``.
+
+    ``store`` is the stateful boundary: teaching persists through it, and
+    generation consults its corpus. Everything else stays pure.
+    """
     op = intent.operation
+
+    if op == "teach":
+        from .engines import teach as teach_engine
+
+        if store is None:
+            raise MissingSource("teaching needs a corpus store (not available here)")
+        spec = _spec(intent)
+        r = teach_engine.teach(
+            _needs_source(intent, source),
+            spec["function"],
+            spec["examples"],
+            store.corpus_text(),
+        )
+        store.replace_corpus(r.corpus_text)
+        return Outcome(
+            None,
+            f"taught {spec['function']!r} — {r.report['cases_verified']} example(s) "
+            f"verified; corpus now has {r.report['corpus_entries']} entr(y/ies)",
+            False,
+            r.report,
+        )
 
     if op == "rename-local":
         r = rewrite.rename_local(
@@ -97,8 +131,8 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
 
     if op == "synth":
         # Retrieval-first: known functions (loops, recursion) come from the
-        # verified corpus; novel ones from enumerative synthesis.
-        r = retrieve.write_function(_spec(intent))
+        # verified corpora (built-in, then taught); novel ones from synthesis.
+        r = retrieve.write_function(_spec(intent), extra=corpus_entries(store))
         return Outcome(None, r.source, False, r.report)
 
     if op == "scaffold":
@@ -139,14 +173,14 @@ def run(intent: Intent, source: str | None = None) -> Outcome:
     raise UnknownIntent(f"no engine for operation {op!r}")
 
 
-def run_all(intents: list[Intent], source: str | None = None) -> Outcome:
+def run_all(intents: list[Intent], source: str | None = None, store=None) -> Outcome:
     """Run a pipeline of intents ("... then ...").
 
     File edits feed forward: each step sees the previous step's edited source.
     Freestanding outputs (generated code, explanations) accumulate in order.
     """
     if len(intents) == 1:
-        return run(intents[0], source)
+        return run(intents[0], source, store)
 
     current = source
     outputs: list[str] = []
@@ -154,7 +188,7 @@ def run_all(intents: list[Intent], source: str | None = None) -> Outcome:
     files: dict = {}
     edited = False
     for intent in intents:
-        outcome = run(intent, current)
+        outcome = run(intent, current, store)
         reports.append(outcome.report)
         if outcome.new_source is not None:
             current = outcome.new_source

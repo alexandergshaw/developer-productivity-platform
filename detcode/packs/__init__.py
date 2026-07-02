@@ -37,9 +37,17 @@ def registry() -> tuple[Pack, ...]:
 
 def match(words: set[str]) -> tuple[Pack, list[str]]:
     """First pack whose keywords intersect ``words``; generic otherwise."""
-    packs = registry()
-    for pack in packs[:-1]:
+    matches = match_all(words)
+    if matches:
+        return matches[0]
+    return registry()[-1], []
+
+
+def match_all(words: set[str]) -> list[tuple[Pack, list[str]]]:
+    """Every non-generic pack whose keywords intersect ``words``, registry order."""
+    out = []
+    for pack in registry()[:-1]:
         hits = sorted(pack.keywords & words)
         if hits:
-            return pack, hits
-    return packs[-1], []
+            out.append((pack, hits))
+    return out

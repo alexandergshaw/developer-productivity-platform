@@ -258,6 +258,29 @@ def _cmd_ask(args) -> int:
     return 0
 
 
+def _walk_py(root: str) -> dict:
+    sources: dict = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+        for fname in sorted(filenames):
+            if fname.endswith(".py"):
+                full = os.path.join(dirpath, fname)
+                sources[os.path.relpath(full, root).replace(os.sep, "/")] = _read(full)
+    return sources
+
+
+def _finding_fingerprints(root: str) -> list[str]:
+    """Content-based fingerprints (path:severity:message) — stable across
+    line-number drift, so the ratchet only trips on genuinely new findings."""
+    from .engines import diagnose
+
+    prints: set[str] = set()
+    for path, source in _walk_py(root).items():
+        for item in diagnose.diagnostics(source):
+            prints.add(f"{path}:{item['severity']}:{item['message']}")
+    return sorted(prints)
+
+
 def _cmd_advise(args) -> int:
     from . import store as store_module
     from .engines import knowledge
@@ -266,16 +289,31 @@ def _cmd_advise(args) -> int:
     store = (
         store_module.Store() if os.path.exists(store_module.DEFAULT_DB_PATH) else None
     )
+    if args.check or args.write_baseline:
+        root = args.dir or "."
+        baseline_path = args.baseline or os.path.join(root, ".detcode-advise-baseline.json")
+        current = _finding_fingerprints(root)
+        if args.write_baseline:
+            _write(baseline_path, json.dumps(current, indent=2) + "\n")
+            print(f"{baseline_path}: baselined {len(current)} finding(s)", file=sys.stderr)
+            return 0
+        baseline = set(json.loads(_read(baseline_path))) if os.path.exists(baseline_path) else set()
+        new = [f for f in current if f not in baseline]
+        fixed = sorted(baseline - set(current))
+        if new:
+            print(f"advise gate: {len(new)} NEW finding(s) not in the baseline:")
+            for fingerprint in new:
+                print(f"  {fingerprint}")
+            print("\nfix them, or accept deliberately: detcode advise --write-baseline"
+                  + (f" --dir {args.dir}" if args.dir else ""))
+            return 2
+        message = f"advise gate: clean — no new findings ({len(baseline)} baselined"
+        message += f", {len(fixed)} fixed and removable from the baseline)" if fixed else ")"
+        print(message)
+        return 0
     if args.dir:
-        sources: dict = {}
-        for dirpath, dirnames, filenames in os.walk(args.dir):
-            dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
-            for fname in sorted(filenames):
-                if fname.endswith(".py"):
-                    full = os.path.join(dirpath, fname)
-                    sources[os.path.relpath(full, args.dir).replace(os.sep, "/")] = _read(full)
         learned = knowledge.load_knowledge(store.knowledge_text()) if store else ()
-        print(knowledge.advise_all(sources, extra_entries=learned).text)
+        print(knowledge.advise_all(_walk_py(args.dir), extra_entries=learned).text)
         return 0
     if not args.file:
         raise knowledge.KnowledgeError("give --file for one file or --dir for a workspace")
@@ -341,10 +379,40 @@ def _study_markdown(records: list[dict]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _study_cards(records: list[dict]) -> str:
+    """The study queue as teaching-assistant notes: answered questions become
+    Q/A flashcards; open ones become prose the cloze quiz can chew on."""
+    lines = []
+    for record in records:
+        if record["status"] == "answered":
+            lines.append(f"Q: {record['question']}")
+            lines.append(f"A: {record['answered_by']}")
+            lines.append("")
+    open_items = [r for r in records if r["status"] == "open"]
+    if open_items:
+        lines.append("Still researching:")
+        lines.extend(f"{r['question']} remains an open question." for r in open_items)
+        lines.append("")
+    return "\n".join(lines) + ("" if not lines else "\n")
+
+
 def _cmd_study(args) -> int:
     from . import store as store_module
 
     records = store_module.Store().open_questions()
+    if args.cards:
+        text = _study_cards(records)
+        if not text.strip():
+            print("nothing to export — ask some questions first", file=sys.stderr)
+            return 0
+        _write(args.cards, text)
+        print(
+            f"{args.cards}: exported — study it with the teaching assistant pack:\n"
+            f"  python -m teaching_assistant cards {args.cards}\n"
+            f"  python -m teaching_assistant quiz {args.cards}",
+            file=sys.stderr,
+        )
+        return 0
     if args.out:
         _write(args.out, _study_markdown(records))
         print(f"{args.out}: study queue exported ({len(records)} question(s))", file=sys.stderr)
@@ -766,6 +834,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     av.add_argument("--file", help="Python source file")
     av.add_argument("--dir", help="review every .py under this directory instead")
+    av.add_argument(
+        "--check", action="store_true",
+        help="CI gate: exit 2 if findings appear that are not in the baseline",
+    )
+    av.add_argument(
+        "--write-baseline", action="store_true",
+        help="accept the current findings as the baseline",
+    )
+    av.add_argument("--baseline", help="baseline path (default: <dir>/.detcode-advise-baseline.json)")
     av.set_defaults(handler=_cmd_advise)
 
     ln = sub.add_parser(
@@ -781,6 +858,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     st = sub.add_parser("study", help="open questions the engine could not answer yet")
     st.add_argument("--out", help="export a markdown reading list to this path")
+    st.add_argument(
+        "--cards", help="export teaching-assistant flashcard notes to this path"
+    )
     st.set_defaults(handler=_cmd_study)
 
     kn = sub.add_parser("knowledge", help="inspect and share the knowledge base")

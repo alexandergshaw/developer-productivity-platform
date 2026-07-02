@@ -200,6 +200,22 @@ def _readme(plan: dict) -> str:
     return "\n".join(lines)
 
 
+def _ci_workflow(slug: str) -> str:
+    return (
+        "name: ci\n\non:\n  push:\n  pull_request:\n\njobs:\n  test:\n"
+        "    runs-on: ubuntu-latest\n    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: actions/setup-python@v5\n"
+        '        with: { python-version: "3.12" }\n'
+        "      - name: Tests\n"
+        "        run: python -m unittest discover -s tests -v\n"
+        "      # Advise gate: new findings since the baseline fail the build.\n"
+        "      # Requires detcode on PATH; drop `|| true` to make it blocking.\n"
+        "      - name: Advise gate\n"
+        f"        run: python -m detcode advise --dir {slug} --check || true\n"
+    )
+
+
 def _pyproject(plan: dict) -> str:
     includes = ", ".join(f'"{s}*"' for _, s in plan["pack_slugs"])
     return (
@@ -265,6 +281,7 @@ def build(
     files.append(ProjectFile("README.md", _readme(plan)))
     files.append(ProjectFile("pyproject.toml", _pyproject(plan)))
     files.append(ProjectFile(".gitignore", "__pycache__/\n*.py[cod]\n*.egg-info/\n"))
+    files.append(ProjectFile(".github/workflows/ci.yml", _ci_workflow(slug)))
     files.sort(key=lambda f: f.path)
 
     report = provenance(
@@ -460,6 +477,7 @@ def build_from_plan(plan: dict, web: bool = False, corpus: tuple = ()) -> Projec
         "README.md": _readme(readme_plan),
         "pyproject.toml": _pyproject(readme_plan),
         ".gitignore": "__pycache__/\n*.py[cod]\n*.egg-info/\n",
+        ".github/workflows/ci.yml": _ci_workflow(slug),
     }
     if web:
         from ..packs import webwrap

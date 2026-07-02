@@ -21,3 +21,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Run test suite (includes the determinism gate)
         run: python -m unittest discover -s tests -v
+      - name: Advise gate (reviewer-of-record — new findings fail the build)
+        run: python -m detcode advise --dir detcode --check

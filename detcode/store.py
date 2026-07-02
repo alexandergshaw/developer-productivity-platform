@@ -17,7 +17,6 @@ import json
 import os
 import sqlite3
 import time
-from contextlib import closing
 
 from .determinism import canonical_json, content_hash
 

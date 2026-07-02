@@ -1047,6 +1047,19 @@ async function runCommand(raw) {
     return;
   }
 
+  const queryMatch = /^query\s+(.+)$/.exec(cmd);
+  if (queryMatch) {
+    try {
+      const resp = await api({ tool: "query", question: queryMatch[1].trim() });
+      termPrint(resp.ok ? esc(resp.output)
+        : `<span class="err">${resp.refused ? "refused" : "error"}: ${esc(resp.error)}</span>`);
+      if (resp.ok && resp.output.includes("study queue")) refreshStudy();
+    } catch (err) {
+      termPrint(`<span class="err">request failed: ${esc(String(err))}</span>`);
+    }
+    return;
+  }
+
   const mintMatch = /^mint\s+(.+)$/.exec(cmd);
   if (mintMatch) { await runMint(mintMatch[1].trim()); return; }
   if (cmd === "mint") {

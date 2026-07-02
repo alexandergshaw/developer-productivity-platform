@@ -51,6 +51,27 @@ CREATE TABLE IF NOT EXISTS open_questions (
     status   TEXT NOT NULL DEFAULT 'open',
     answered_by TEXT
 );
+CREATE TABLE IF NOT EXISTS notes (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    kind  TEXT NOT NULL,
+    text  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS links (
+    url   TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    tags  TEXT NOT NULL,
+    note  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS code_index (
+    root   TEXT NOT NULL,
+    path   TEXT NOT NULL,
+    line   INTEGER NOT NULL,
+    kind   TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    doc    TEXT NOT NULL,
+    PRIMARY KEY (root, path, line, symbol)
+);
 CREATE TABLE IF NOT EXISTS audit (
     id      INTEGER PRIMARY KEY AUTOINCREMENT,
     at      REAL NOT NULL,
@@ -179,6 +200,60 @@ class Store:
             )
         self.audit(action, f"{len(entries)} knowledge entr(y/ies)", content_hash(knowledge_text))
         return len(entries)
+
+    # ----------------------------------------------------------- knowledge web
+    def add_note(self, title: str, kind: str, text: str) -> int:
+        with self._conn() as db:
+            cursor = db.execute(
+                "INSERT INTO notes (title, kind, text) VALUES (?, ?, ?)",
+                (title, kind, text),
+            )
+            note_id = cursor.lastrowid
+        self.audit("note", title, kind)
+        return note_id
+
+    def notes(self) -> list[dict]:
+        with self._conn() as db:
+            rows = db.execute("SELECT id, title, kind, text FROM notes ORDER BY id").fetchall()
+        return [{"id": i, "title": t, "kind": k, "text": x} for i, t, k, x in rows]
+
+    def add_link(self, url: str, title: str = "", tags: str = "", note: str = "") -> None:
+        with self._conn() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO links (url, title, tags, note) VALUES (?, ?, ?, ?)",
+                (url, title, tags, note),
+            )
+        self.audit("link", url, tags)
+
+    def links(self) -> list[dict]:
+        with self._conn() as db:
+            rows = db.execute("SELECT url, title, tags, note FROM links ORDER BY url").fetchall()
+        return [{"url": u, "title": t, "tags": g, "note": n} for u, t, g, n in rows]
+
+    def replace_code_index(self, root: str, entries: list[dict]) -> int:
+        with self._conn() as db:
+            db.execute("DELETE FROM code_index WHERE root = ?", (root,))
+            db.executemany(
+                "INSERT OR REPLACE INTO code_index (root, path, line, kind, symbol, doc) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [
+                    (root, e["path"], e["line"], e["kind"], e["symbol"], e.get("doc") or "")
+                    for e in entries
+                ],
+            )
+        self.audit("index", root, f"{len(entries)} symbol(s)")
+        return len(entries)
+
+    def code_entries(self) -> list[dict]:
+        with self._conn() as db:
+            rows = db.execute(
+                "SELECT root, path, line, kind, symbol, doc FROM code_index "
+                "ORDER BY root, path, line, symbol"
+            ).fetchall()
+        return [
+            {"root": r, "path": p, "line": l, "kind": k, "symbol": s, "doc": d}
+            for r, p, l, k, s, d in rows
+        ]
 
     # ----------------------------------------------------------- study queue
     def log_question(self, question: str, keywords: list[str]) -> None:

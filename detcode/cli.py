@@ -44,6 +44,12 @@ def _knowledge_error():
     return KnowledgeError
 
 
+def _web_error():
+    from .engines.web import WebError
+
+    return WebError
+
+
 def _load_corpus(path_arg: str | None) -> tuple:
     """User corpus entries, verified on load.
 
@@ -507,6 +513,140 @@ def _cmd_knowledge_import(args) -> int:
     return 0
 
 
+def _run_boundary_command(env_var: str, prompt: str, arg: str | None = None) -> str:
+    """Run a user-configured external command — the explicit non-deterministic
+    boundary (OCR, LLM). detcode's core never calls out; only these do, and
+    their output is always labeled as coming from the boundary."""
+    import subprocess
+
+    command = os.environ.get(env_var)
+    if not command:
+        raise _knowledge_error()(
+            f"{env_var} is not set. Configure an external command first, e.g.\n"
+            f'  set {env_var}=tesseract {{}} -    (OCR)\n'
+            f'  set {env_var}=claude -p           (LLM)\n'
+            "detcode's deterministic core never calls out; this boundary is opt-in."
+        )
+    if arg is not None:
+        command = command.replace("{}", arg)
+    completed = subprocess.run(
+        command, shell=True, input=prompt, capture_output=True, text=True,
+        encoding="utf-8", errors="replace",
+    )
+    if completed.returncode != 0:
+        raise _knowledge_error()(
+            f"{env_var} command failed ({completed.returncode}): {completed.stderr.strip()[:300]}"
+        )
+    return completed.stdout
+
+
+def _cmd_note(args) -> int:
+    from . import store as store_module
+
+    store = store_module.Store()
+    if args.note_command == "list":
+        for note in store.notes():
+            print(f"[{note['id']}] {note['title']}  ({note['kind']}, {len(note['text'].splitlines())} lines)")
+        return 0
+    # add
+    if args.image:
+        text = _run_boundary_command("DETCODE_OCR_CMD", "", arg=args.image)
+        kind = args.kind or "chat-ocr"
+        title = args.title or os.path.basename(args.image)
+    else:
+        if not args.file:
+            raise _knowledge_error()("give a transcript FILE or --image SCREENSHOT")
+        text = _read(args.file)
+        kind = args.kind or "transcript"
+        title = args.title or os.path.splitext(os.path.basename(args.file))[0]
+    if not text.strip():
+        raise _knowledge_error()("the note is empty — nothing to add")
+    note_id = store.add_note(title, kind, text)
+    from .engines import web as web_engine
+
+    note_facts = web_engine.facts(text)
+    print(
+        f"{store.path}: note [{note_id}] {title!r} added ({kind}; "
+        f"{len(note_facts)} fact(s): "
+        f"{sum(1 for f in note_facts if f['kind'] == 'decision')} decision(s), "
+        f"{sum(1 for f in note_facts if f['kind'] == 'action')} action(s), "
+        f"{sum(1 for f in note_facts if f['kind'] == 'question')} question(s))",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _cmd_link(args) -> int:
+    from . import store as store_module
+    from .engines import web as web_engine
+
+    store = store_module.Store()
+    if args.link_command == "add":
+        store.add_link(args.url, args.title or "", args.tags or "", args.note or "")
+        print(f"{store.path}: link saved (never fetched — work-network URLs are fine)",
+              file=sys.stderr)
+        return 0
+    # list / find
+    pattern = (getattr(args, "pattern", None) or "").lower()
+    for link in store.links():
+        haystack = f"{link['url']} {link['title']} {link['tags']} {link['note']}".lower()
+        if pattern and pattern not in haystack:
+            continue
+        tags = f"  [{link['tags']}]" if link["tags"] else ""
+        print(f"{link['title'] or link['url']}{tags}")
+        print(f"  {link['url']}")
+    return 0
+
+
+def _cmd_query(args) -> int:
+    from . import store as store_module
+    from .engines import web as web_engine
+
+    store = store_module.Store()
+    result = web_engine.query(
+        args.question, store.notes(), store.links(), store.code_entries()
+    )
+    if result.report.get("outcome") == "miss":
+        store.log_question(args.question, result.report.get("question_keywords", []))
+    print(result.text)
+    if args.llm:
+        prompt = (
+            "Answer the question using ONLY this evidence; cite it.\n\n"
+            f"Question: {args.question}\n\nEvidence:\n{result.text}\n"
+        )
+        synthesis = _run_boundary_command("DETCODE_LLM_CMD", prompt)
+        print("\n--- LLM synthesis (non-deterministic boundary — verify against the citations) ---")
+        print(synthesis.strip())
+    return 0
+
+
+def _cmd_index(args) -> int:
+    from . import store as store_module
+    from .engines import codeindex
+
+    root = args.dir
+    entries = codeindex.index_tree(root)
+    label = args.label or os.path.basename(os.path.abspath(root))
+    store = store_module.Store()
+    count = store.replace_code_index(label, entries)
+    files = len({e["path"] for e in entries})
+    print(
+        f"{store.path}: indexed {label!r} — {count} symbol(s) across {files} file(s). "
+        "Only symbol metadata is stored, locally; the source never leaves this machine.",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _cmd_web(args) -> int:
+    from . import store as store_module
+    from .engines import web as web_engine
+
+    store = store_module.Store()
+    print(web_engine.related(args.term, store.notes(), store.links()).text)
+    return 0
+
+
 def _cmd_synth(args) -> int:
     spec = json.loads(_read(args.examples))
     if args.name:
@@ -825,6 +965,50 @@ def build_parser() -> argparse.ArgumentParser:
     cp_imp.add_argument("file", help="corpus JSON file to import")
     cp_imp.set_defaults(handler=_cmd_corpus_import)
 
+    nt = sub.add_parser("note", help="knowledge web: meeting transcripts and chat captures")
+    nt_sub = nt.add_subparsers(dest="note_command", required=True)
+    nt_add = nt_sub.add_parser("add", help="add a transcript file (or --image via OCR boundary)")
+    nt_add.add_argument("file", nargs="?", help="transcript/chat text file")
+    nt_add.add_argument("--image", help="screenshot; runs DETCODE_OCR_CMD (external boundary)")
+    nt_add.add_argument("--title", help="note title (default: file name)")
+    nt_add.add_argument("--kind", help="transcript | chat | text (default by input)")
+    nt_add.set_defaults(handler=_cmd_note)
+    nt_list = nt_sub.add_parser("list", help="stored notes")
+    nt_list.set_defaults(handler=_cmd_note)
+
+    lk = sub.add_parser("link", help="knowledge web: the URL network (never fetched)")
+    lk_sub = lk.add_subparsers(dest="link_command", required=True)
+    lk_add = lk_sub.add_parser("add", help="save a URL with tags and a note")
+    lk_add.add_argument("url")
+    lk_add.add_argument("--title")
+    lk_add.add_argument("--tags", help="comma-separated tags")
+    lk_add.add_argument("--note", help="why this link matters")
+    lk_add.set_defaults(handler=_cmd_link)
+    lk_find = lk_sub.add_parser("find", help="search the URL network")
+    lk_find.add_argument("pattern", nargs="?", help="substring over url/title/tags/note")
+    lk_find.set_defaults(handler=_cmd_link)
+
+    qr = sub.add_parser(
+        "query", help="ask the knowledge web: evidence with citations, never synthesis"
+    )
+    qr.add_argument("question", help='e.g. "what did we decide about the auth timeout?"')
+    qr.add_argument(
+        "--llm", action="store_true",
+        help="also pipe the evidence through DETCODE_LLM_CMD (labeled, non-deterministic)",
+    )
+    qr.set_defaults(handler=_cmd_query)
+
+    wb = sub.add_parser("web", help="a term's neighborhood: related terms, notes, links, people")
+    wb.add_argument("term")
+    wb.set_defaults(handler=_cmd_web)
+
+    ix = sub.add_parser(
+        "index", help="index a codebase's symbols locally (nothing is uploaded)"
+    )
+    ix.add_argument("--dir", required=True, help="repository root to index")
+    ix.add_argument("--label", help="index label (default: directory name)")
+    ix.set_defaults(handler=_cmd_index)
+
     ak = sub.add_parser("ask", help="technical guidance (not code generation)")
     ak.add_argument("question", help='e.g. "how should I store money amounts?"')
     ak.set_defaults(handler=_cmd_ask)
@@ -1003,6 +1187,7 @@ def main(argv: list[str] | None = None) -> int:
         teach.CorpusError,
         mint_engine.MintError,
         _knowledge_error(),
+        _web_error(),
         _store_error(),
         cnl.CNLError,
         planner.UnknownIntent,

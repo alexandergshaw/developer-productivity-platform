@@ -150,6 +150,37 @@ with the question logged to the study queue. The loop closes from every
 direction: `learn` adds a verified entry and answers matching open
 questions — and so do `teach` and `mint`, because experience counts. Bare
 questions work in English too ("how do I ...", "should I ...").
+
+## The knowledge web: your work, deterministically queryable
+
+Local-first by construction — notes, links, and the code index live in
+`.detcode/detcode.db` on your machine. Nothing is fetched, nothing is
+uploaded; there is no remote to upload to.
+
+```bash
+detcode note add standup.txt                  # meeting transcripts, chat exports
+detcode note add --image teams.png            # screenshots via DETCODE_OCR_CMD
+detcode link add https://wiki.corp/runbook --tags auth,oncall --note "..."
+detcode index --dir path/to/work/repo         # symbols only, stored locally
+
+detcode query "what did we decide about the auth timeout?"
+detcode web auth                              # a term's neighborhood
+detcode query "..." --llm                     # evidence piped through DETCODE_LLM_CMD
+```
+
+- **Notes** are parsed with fixed rules: speaker lines ("Name: ..."),
+  decisions / actions / questions classified by fixed word tables.
+- **`query` returns evidence with citations** — note title + line number,
+  `[DECISION]`/`[ACTION]` tags with speakers, related links, and
+  `path:line` code symbols — never a synthesized claim. Misses join the
+  study queue.
+- **Links are never fetched**, so URLs only reachable on a work network are
+  fine; they join the web through their title/tags/notes.
+- **The code index** stores symbol metadata (name, kind, path, line,
+  docstring first line) for Python (AST) and JS/TS (fixed patterns).
+- **The LLM/OCR boundary is explicit**: set `DETCODE_OCR_CMD` (e.g.
+  tesseract) or `DETCODE_LLM_CMD` (e.g. `claude -p`) and detcode shells out
+  at clearly labeled points; the deterministic core never calls out.
 The workbench teaches and mints too: the "TEACH FROM ACTIVE FILE" panel,
 `teach <func> where <func>(...) == ...` in the terminal, and "Mint this
 project…" / `mint kw1,kw2` (the workspace's tests run server-side and must

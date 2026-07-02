@@ -40,11 +40,13 @@ from .engines import (
 from .engines import teach as teach_engine
 from .engines.knowledge import KnowledgeError
 from .engines.mint import MintError
+from .engines.web import WebError
 from .store import StoreError
 
 REFUSALS = (
     MintError,
     KnowledgeError,
+    WebError,
     rewrite.Unsafe,
     builder.BuildError,
     teach_engine.TeachError,
@@ -181,6 +183,22 @@ def run_request(req, store=None) -> dict:
                 suffix = f"  [answered by: {r['answered_by']}]" if r["answered_by"] else ""
                 lines.append(f"{mark} {r['question']}{suffix}")
             return _text("\n".join(lines), {"open": len(records)})
+        if tool == "query":
+            from .engines import web as web_engine
+
+            if store is None:
+                return {"ok": False, "refused": True,
+                        "error": "the knowledge web needs a store (not available here)"}
+            result = web_engine.query(
+                str(req.get("question") or ""),
+                store.notes(), store.links(), store.code_entries(),
+            )
+            if result.report.get("outcome") == "miss":
+                store.log_question(
+                    str(req.get("question") or ""),
+                    result.report.get("question_keywords", []),
+                )
+            return _text(result.text, result.report)
         if tool == "advise":
             from .engines import knowledge
 

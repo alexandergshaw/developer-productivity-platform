@@ -140,7 +140,8 @@ def run(intent: Intent, source: str | None = None, store=None) -> Outcome:
         return Outcome(None, r.source, False, r.report)
 
     if op == "new":
-        project = builder.build(intent.get("direction") or "")
+        extra = tuple(store.user_packs()) if store is not None else ()
+        project = builder.build(intent.get("direction") or "", extra_packs=extra)
         return Outcome(
             None,
             builder.render(project),

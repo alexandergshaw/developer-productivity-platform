@@ -17,6 +17,7 @@ import json
 import os
 import sqlite3
 import time
+from contextlib import closing
 
 from .determinism import canonical_json, content_hash
 
@@ -52,6 +53,22 @@ class StoreError(Exception):
     """The store was unusable or held data that failed verification."""
 
 
+class _Connection:
+    """Context manager: commit/rollback like sqlite3's, plus a real close."""
+
+    def __init__(self, path: str):
+        self._db = sqlite3.connect(path)
+
+    def __enter__(self):
+        return self._db.__enter__()
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return self._db.__exit__(exc_type, exc, tb)
+        finally:
+            self._db.close()
+
+
 class Store:
     """A per-call-connection SQLite store (safe under threaded servers)."""
 
@@ -64,7 +81,8 @@ class Store:
             db.executescript(_SCHEMA)
 
     def _conn(self):
-        return sqlite3.connect(self.path)
+        """A closing, transaction-managed connection: with self._conn() as db."""
+        return _Connection(self.path)
 
     def audit(self, action: str, subject: str, detail: str = "") -> None:
         with self._conn() as db:

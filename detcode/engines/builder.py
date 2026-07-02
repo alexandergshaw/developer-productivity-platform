@@ -80,7 +80,12 @@ def _order_matches(direction: str, matches: list) -> list:
     return [m for _, m in sorted(enumerate(matches), key=first_position)]
 
 
-def elaborate(direction: str, name: str | None = None, web: bool = False) -> dict:
+def elaborate(
+    direction: str,
+    name: str | None = None,
+    web: bool = False,
+    extra_packs: tuple = (),
+) -> dict:
     """Derive the build plan from the direction, recording every decision."""
     if not isinstance(direction, str) or not direction.strip():
         raise BuildError("give a direction, e.g. detcode new \"resume tailorer\"")
@@ -89,7 +94,7 @@ def elaborate(direction: str, name: str | None = None, web: bool = False) -> dic
     words = set(_words(direction))
     web = web or bool(words & _WEB_WORDS)
 
-    matches = _order_matches(direction, packs.match_all(words))
+    matches = _order_matches(direction, packs.match_all(words, extra_packs))
     if not matches:
         generic = packs.registry()[-1]
         matches = [(generic, [])]
@@ -217,15 +222,21 @@ def _pyproject(plan: dict) -> str:
     )
 
 
-def build(direction: str, name: str | None = None, web: bool = False) -> Project:
+def build(
+    direction: str,
+    name: str | None = None,
+    web: bool = False,
+    extra_packs: tuple = (),
+) -> Project:
     """Build a complete project from a general direction.
 
     A direction matching several packs ("a teaching assistant with a resume
     module") composes them: each pack's package lands in the same project.
     ``web=True`` (or "with a web ui" in the direction) adds a stdlib WSGI
-    wrapper over the primary package's CLI.
+    wrapper over the primary package's CLI. ``extra_packs`` holds user-minted
+    packs (hash-verified by the store on load).
     """
-    plan = elaborate(direction, name, web)
+    plan = elaborate(direction, name, web, extra_packs)
     slug = plan["slug"]
 
     template_sets = [

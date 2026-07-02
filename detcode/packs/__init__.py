@@ -35,18 +35,23 @@ def registry() -> tuple[Pack, ...]:
     )
 
 
-def match(words: set[str]) -> tuple[Pack, list[str]]:
+def match(words: set[str], extra: tuple = ()) -> tuple[Pack, list[str]]:
     """First pack whose keywords intersect ``words``; generic otherwise."""
-    matches = match_all(words)
+    matches = match_all(words, extra)
     if matches:
         return matches[0]
     return registry()[-1], []
 
 
-def match_all(words: set[str]) -> list[tuple[Pack, list[str]]]:
-    """Every non-generic pack whose keywords intersect ``words``, registry order."""
+def match_all(words: set[str], extra: tuple = ()) -> list[tuple[Pack, list[str]]]:
+    """Every non-generic pack whose keywords intersect ``words``.
+
+    Built-in packs come first (registry order), then user-minted ones
+    (``extra``, sorted by key) — deterministic across machines.
+    """
+    candidates = list(registry()[:-1]) + sorted(extra, key=lambda p: p.key)
     out = []
-    for pack in registry()[:-1]:
+    for pack in candidates:
         hits = sorted(pack.keywords & words)
         if hits:
             out.append((pack, hits))

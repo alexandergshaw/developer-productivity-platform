@@ -101,10 +101,33 @@ detcode teach --file core.py --func format_authors --examples ex.json
 ```
 
 `teach` verifies the function in isolation against its examples and promotes
-it into a local corpus (`.detcode/corpus.json`). Retrieval consults that
-corpus (re-verifying every entry on load — a tampered entry refuses loudly),
-so every future project that needs the function gets it for free: **the
-app's capability grows by acquiring verified artifacts, never statistics.**
+it into detcode's memory. Retrieval consults it (re-verifying every entry on
+load — a tampered entry refuses loudly), so every future project that needs
+the function gets it for free: **the app's capability grows by acquiring
+verified artifacts, never statistics.**
+
+## detcode's memory: the database
+
+`.detcode/detcode.db` (SQLite — still zero dependencies) backs everything
+learned, at two scales:
+
+```bash
+detcode teach --all --dir myproject   # sweep: examples mined from its tests
+detcode corpus list                   # what's been taught
+detcode corpus export --out team.json # canonical JSON — commit it to share
+detcode corpus import team.json      # fully verified before merging
+
+detcode mint --keywords "studybuddy,revision"  # a green project becomes a PACK
+detcode packs                         # built-in and minted packs
+detcode new "a studybuddy for revision season" # retrieves the whole project
+```
+
+Functions are *taught* (corpus), projects are *minted* (packs) — both
+proof-carrying: teaching verifies in isolation, minting requires the
+project's own tests green, and everything is hash-verified on every load.
+The workbench teaches too: the "TEACH FROM ACTIVE FILE" panel and
+`teach <func> where <func>(...) == ...` in the terminal persist through the
+server's store.
 
 Each capability also has a direct subcommand:
 

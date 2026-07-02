@@ -21,6 +21,7 @@ from .engines import (
     document,
     explain,
     gentest,
+    mint as mint_engine,
     plan as plan_engine,
     repair,
     retrieve,
@@ -302,6 +303,51 @@ def _cmd_plan(args) -> int:
     return 0
 
 
+def _user_packs() -> tuple:
+    from . import store as store_module
+
+    if os.path.exists(store_module.DEFAULT_DB_PATH):
+        return tuple(store_module.Store().user_packs())
+    return ()
+
+
+def _cmd_mint(args) -> int:
+    from . import store as store_module
+
+    root = args.dir or "."
+    files: dict = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+        for fname in sorted(filenames):
+            full = os.path.join(dirpath, fname)
+            files[os.path.relpath(full, root).replace(os.sep, "/")] = _read(full)
+    keywords = [k for k in (args.keywords or "").split(",") if k.strip()]
+    record = mint_engine.mint_record(
+        files, keywords, key=args.key, title=args.title, description=args.description
+    )
+    result = mint_engine.verify_project(root, record["default_slug"])
+    store = store_module.Store()
+    store.upsert_pack(record)
+    report = mint_engine.mint_report(record, result.testsRun)
+    print(
+        f"{store.path}: minted pack {record['key']!r} "
+        f"({result.testsRun} test(s) verified green, keywords: {', '.join(record['keywords'])})",
+        file=sys.stderr,
+    )
+    print(f'try: detcode new "a {record["keywords"][0]} thing"', file=sys.stderr)
+    return 0
+
+
+def _cmd_packs(args) -> int:
+    from . import packs as packs_module
+
+    for pack in packs_module.registry()[:-1]:
+        print(f"{pack.key}  [built-in]  keywords: {', '.join(sorted(pack.keywords))}")
+    for pack in _user_packs():
+        print(f"{pack.key}  [minted]    keywords: {', '.join(sorted(pack.keywords))}")
+    return 0
+
+
 def _cmd_new(args) -> int:
     if args.plan:
         if args.direction:
@@ -310,7 +356,9 @@ def _cmd_new(args) -> int:
             json.loads(_read(args.plan)), web=args.web, corpus=_load_corpus(args.corpus)
         )
     elif args.direction:
-        project = builder.build(args.direction, name=args.name, web=args.web)
+        project = builder.build(
+            args.direction, name=args.name, web=args.web, extra_packs=_user_packs()
+        )
     else:
         raise builder.BuildError('give a direction (detcode new "...") or --plan file.json')
     if args.dry_run:
@@ -436,6 +484,19 @@ def build_parser() -> argparse.ArgumentParser:
     cp_imp.add_argument("file", help="corpus JSON file to import")
     cp_imp.set_defaults(handler=_cmd_corpus_import)
 
+    mt = sub.add_parser(
+        "mint", help="turn a finished, green-tested project into a reusable pack"
+    )
+    mt.add_argument("--dir", help="project directory (default: .)")
+    mt.add_argument("--keywords", required=True, help="comma-separated match keywords")
+    mt.add_argument("--key", help="pack key (default: derived from the package name)")
+    mt.add_argument("--title", help="pack title")
+    mt.add_argument("--description", help="pack description")
+    mt.set_defaults(handler=_cmd_mint)
+
+    pk = sub.add_parser("packs", help="list built-in and minted packs")
+    pk.set_defaults(handler=_cmd_packs)
+
     rp = sub.add_parser(
         "repair", help="repair a buggy function so it passes input/output tests"
     )
@@ -529,6 +590,7 @@ def main(argv: list[str] | None = None) -> int:
         builder.BuildError,
         teach.TeachError,
         teach.CorpusError,
+        mint_engine.MintError,
         _store_error(),
         cnl.CNLError,
         planner.UnknownIntent,

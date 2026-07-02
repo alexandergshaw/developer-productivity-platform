@@ -132,7 +132,9 @@ def run_request(req, store=None) -> dict:
                 )
             else:
                 project = builder.build(
-                    str(req.get("direction") or ""), web=bool(req.get("web"))
+                    str(req.get("direction") or ""),
+                    web=bool(req.get("web")),
+                    extra_packs=tuple(store.user_packs()) if store is not None else (),
                 )
             resp = _generated(builder.render(project), project.report)
             resp["files"] = {f.path: f.content for f in project.files}

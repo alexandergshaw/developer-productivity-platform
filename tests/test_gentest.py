@@ -126,5 +126,73 @@ class EdgeCaseTests(unittest.TestCase):
         self.assertEqual(len(hashes), 1)
 
 
+class RaisesExpectationTests(unittest.TestCase):
+    """Examples with a "raises" key become assertRaises test methods."""
+
+    RAISES_SPEC = {
+        "function": "checked_area",
+        "source": (
+            "def checked_area(w, h):\n"
+            "    if w < 0 or h < 0:\n"
+            "        raise ValueError('negative dimension')\n"
+            "    return w * h\n"
+        ),
+        "examples": [
+            {"in": [2, 3], "out": 6},
+            {"in": [-1, 5], "raises": "ValueError"},
+        ],
+    }
+
+    def test_raises_examples_emit_assert_raises(self):
+        generated = gentest.gentest(self.RAISES_SPEC).source
+        self.assertIn("with self.assertRaises(ValueError):", generated)
+        self.assertIn("checked_area(-1, 5)", generated)
+        self.assertIn("self.assertEqual(checked_area(2, 3), 6)", generated)
+
+    def test_raises_tests_run_green_against_conforming_function(self):
+        generated = gentest.gentest(self.RAISES_SPEC).source
+        namespace = {"__name__": "generated_tests"}
+        exec(compile(generated, "<gentest>", "exec"), namespace)
+        suite = unittest.TestLoader().loadTestsFromTestCase(namespace["TestCheckedArea"])
+        result = unittest.TestResult()
+        suite.run(result)
+        self.assertGreaterEqual(result.testsRun, 2)
+        self.assertEqual(result.failures, [])
+        self.assertEqual(result.errors, [])
+
+    def test_raises_only_spec_is_valid(self):
+        spec = {
+            "function": "boom",
+            "module": "explosives",
+            "examples": [{"in": [1], "raises": "RuntimeError"}],
+        }
+        generated = gentest.gentest(spec).source
+        self.assertIn("with self.assertRaises(RuntimeError):", generated)
+
+    def test_refuses_non_identifier_raises(self):
+        spec = {
+            "function": "f",
+            "module": "m",
+            "examples": [{"in": [1], "raises": "not an identifier!"}],
+        }
+        with self.assertRaises(SpecError):
+            gentest.gentest(spec)
+
+    def test_refuses_out_and_raises_together(self):
+        spec = {
+            "function": "f",
+            "module": "m",
+            "examples": [{"in": [1], "out": 2, "raises": "ValueError"}],
+        }
+        with self.assertRaises(SpecError):
+            gentest.gentest(spec)
+
+    def test_deterministic_with_raises(self):
+        hashes = {
+            content_hash(gentest.gentest(self.RAISES_SPEC).source) for _ in range(10)
+        }
+        self.assertEqual(len(hashes), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

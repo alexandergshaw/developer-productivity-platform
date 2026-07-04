@@ -57,6 +57,7 @@ def parse_ticket(text: str) -> dict:
     Returns dict with keys:
     - title: first non-empty line (stripped of "bug:/feature:/task:" prefixes)
     - examples: list of {name, args, expected, source_line}
+    - raises: list of {name, args, raises, source_line} — test-only expectations
     - code_blocks: list of {lang, code}
     - tracebacks: list of {file, line, error}
     - files: list of backticked file paths
@@ -79,7 +80,28 @@ def parse_ticket(text: str) -> dict:
     # Example forms: a) name(args) == expected  b) name(args) returns expected
     # c) name(args) should return expected  d) name(args) -> expected / =>
     # e) "expected E but got G" / "got G, expected E" / "returns G instead of E"
+    # Plus: doctests (>>> call, next non-empty line), bullet-wrapped forms,
+    # Call:/Actual:/Expected: blocks, markdown tables, raises-expectations.
     examples: list[dict] = []
+    raises_expectations: list[dict] = []
+    seen_examples: set = set()   # dedupe by (name, repr(args), repr(expected))
+    seen_raises: set = set()
+
+    def _add_raw(name: str, args_str: str, expected_str: str, line_num: int) -> None:
+        """Parse and record one example; unparseable candidates skip silently."""
+        try:
+            args = _parse_args(args_str)
+            expected = ast.literal_eval(expected_str)
+        except (ValueError, SyntaxError):
+            return
+        key = (name, repr(args), repr(expected))
+        if key in seen_examples:
+            return
+        seen_examples.add(key)
+        examples.append({
+            "name": name, "args": args, "expected": expected, "source_line": line_num
+        })
+
     example_patterns = [
         # Form a: name(args) == expected (also in backticks)
         # Stop at word boundaries: and, or, ;
@@ -92,8 +114,69 @@ def parse_ticket(text: str) -> dict:
         r"(\w+)\(([^)]*)\)\s+(?:->|=>)\s+([^&;]+?)(?:\s+(?:and|or)|;|$)",
     ]
 
-    seen_examples = set()  # to dedupe by (name, args_str, expected_str)
-    for line_num, line in enumerate(lines, 1):
+    bullet_re = re.compile(r"^\s*(?:[-*]|\d+\.)\s+")
+    doctest_re = re.compile(r"^\s*>>>\s*(\w+)\((.*)\)\s*$")
+    call_line_re = re.compile(r"^\s*Call:\s*(\w+)\((.*)\)\s*$", re.IGNORECASE)
+    expected_line_re = re.compile(r"^\s*Expected:\s*(.+?)\s*$", re.IGNORECASE)
+    inline_actual_re = re.compile(
+        r"(\w+)\(([^)]*)\)\s*:\s*actual\s+(.+?),\s*expected\s+(.+?)\s*$", re.IGNORECASE
+    )
+    raises_re = re.compile(r"(\w+)\(([^)]*)\)\s+(?:should\s+raise|raises)\s+(\w+)")
+
+    for line_num, raw_line in enumerate(lines, 1):
+        line = bullet_re.sub("", raw_line)  # bullets wrap the ordinary forms
+
+        # Doctest: ">>> name(args)" — the next non-empty line is the expectation.
+        match = doctest_re.match(raw_line)
+        if match:
+            for follower in lines[line_num:]:
+                stripped = follower.strip()
+                if not stripped:
+                    continue
+                _add_raw(match.group(1), match.group(2).strip(), stripped, line_num)
+                break
+            continue
+
+        # "Call: area(2, 3)" then "Expected: 6" (Actual ignored; within 3 lines).
+        match = call_line_re.match(line)
+        if match:
+            for offset in range(1, 4):
+                index = line_num - 1 + offset
+                if index >= len(lines):
+                    break
+                follower = expected_line_re.match(lines[index])
+                if follower:
+                    _add_raw(match.group(1), match.group(2).strip(),
+                             follower.group(1).strip().rstrip(".,;:"), line_num)
+                    break
+            continue
+
+        # Single-line "area(2, 3): actual 5, expected 6".
+        match = inline_actual_re.search(line)
+        if match:
+            _add_raw(match.group(1), match.group(2).strip(),
+                     match.group(4).strip().rstrip(".,;:"), line_num)
+            continue
+
+        # Raises-expectations: "name(args) raises SomeError" — tests only;
+        # repair/synth cannot verify raising behavior, so they never see these.
+        for match in raises_re.finditer(line):
+            error_name = match.group(3)
+            key = (match.group(1), match.group(2).strip(), error_name)
+            if key in seen_raises or not error_name.isidentifier():
+                continue
+            try:
+                args = _parse_args(match.group(2).strip())
+            except ValueError:
+                continue  # symbolic args — skip the candidate entirely
+            seen_raises.add(key)
+            raises_expectations.append({
+                "name": match.group(1),
+                "args": args,
+                "raises": error_name,
+                "source_line": line_num,
+            })
+
         # Check form e first: "expected E but got G" / "got G, expected E" / "returns G instead of E" / "returns G, expected E"
         # This must be checked first to avoid form d "returns" from matching the same line
         form_e_found = False
@@ -123,47 +206,24 @@ def parse_ticket(text: str) -> dict:
             # Look for a function call in the same line
             call_match = re.search(r'(\w+)\(([^)]*)\)', line)
             if call_match:
-                name = call_match.group(1)
-                args_str = call_match.group(2).strip()
-                form_e_key = (name, args_str, expected_val)
-                if form_e_key not in seen_examples:
-                    try:
-                        args = _parse_args(args_str)
-                        expected = ast.literal_eval(expected_val)
-                        examples.append({
-                            "name": name, "args": args, "expected": expected,
-                            "source_line": line_num
-                        })
-                        seen_examples.add(form_e_key)
-                    except (ValueError, SyntaxError):
-                        pass  # skip unparseable
+                _add_raw(call_match.group(1), call_match.group(2).strip(),
+                         expected_val, line_num)
             # Skip form a-d patterns if form e matched to avoid double-counting
             continue
 
         # Check forms a-d
         for pattern in example_patterns:
             for match in re.finditer(pattern, line):
-                name = match.group(1)
-                args_str = match.group(2).strip()
-                expected_str = match.group(3).strip().rstrip('.,;:')
+                _add_raw(match.group(1), match.group(2).strip(),
+                         match.group(3).strip().rstrip(".,;:"), line_num)
 
-                key = (name, args_str, expected_str)
-                if key in seen_examples:
-                    continue
-
-                try:
-                    args = _parse_args(args_str)
-                    expected = ast.literal_eval(expected_str)
-                    examples.append({
-                        "name": name, "args": args, "expected": expected,
-                        "source_line": line_num
-                    })
-                    seen_examples.add(key)
-                except (ValueError, SyntaxError):
-                    pass  # skip unparseable
+    # Markdown tables: the header names the input/output columns; the function
+    # comes from a call cell or a backticked name in the previous 5 lines.
+    _extract_table_examples(lines, _add_raw)
 
     # Sort examples by first occurrence (source_line)
     examples = sorted(examples, key=lambda e: e["source_line"])
+    raises_expectations = sorted(raises_expectations, key=lambda e: e["source_line"])
 
     # Extract code blocks
     code_blocks: list[dict] = []
@@ -247,6 +307,7 @@ def parse_ticket(text: str) -> dict:
     return {
         "title": title,
         "examples": examples,
+        "raises": raises_expectations,
         "code_blocks": code_blocks,
         "tracebacks": tracebacks,
         "files": unique_files,
@@ -260,6 +321,53 @@ def parse_ticket(text: str) -> dict:
         "direction": direction,
         "lines": lines,
     }
+
+
+_INPUT_HEADERS = ("input", "args", "call")
+_OUTPUT_HEADERS = ("output", "expected", "result")
+
+
+def _extract_table_examples(lines: list, add_raw) -> None:
+    """Markdown tables → examples.
+
+    A table qualifies when its header row names an input column (input/args/
+    call) and an output column (output/expected/result). The function name
+    comes from a full call in the input cell, else from the last backticked
+    name within the 5 lines above the table.
+    """
+    cell_call_re = re.compile(r"^`?(\w+)\((.*)\)`?$")
+    context_re = re.compile(r"`(\w+)(?:\(\))?`")
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if not (stripped.startswith("|") and stripped.count("|") >= 2):
+            i += 1
+            continue
+        header = [c.strip().lower() for c in stripped.strip("|").split("|")]
+        in_col = next((j for j, c in enumerate(header)
+                       if any(k in c for k in _INPUT_HEADERS)), None)
+        out_col = next((j for j, c in enumerate(header)
+                        if any(k in c for k in _OUTPUT_HEADERS)), None)
+        if in_col is None or out_col is None:
+            i += 1
+            continue
+        context_name = None
+        for back in range(max(0, i - 5), i):
+            for match in context_re.finditer(lines[back]):
+                context_name = match.group(1)
+        j = i + 1
+        while j < len(lines) and lines[j].strip().startswith("|"):
+            row = [c.strip() for c in lines[j].strip().strip("|").split("|")]
+            is_separator = all(c and set(c) <= set(":- ") for c in row)
+            if not is_separator and len(row) > max(in_col, out_col):
+                expected_cell = row[out_col].strip("`")
+                call = cell_call_re.match(row[in_col])
+                if call:
+                    add_raw(call.group(1), call.group(2).strip(), expected_cell, j + 1)
+                elif context_name:
+                    add_raw(context_name, row[in_col].strip("`"), expected_cell, j + 1)
+            j += 1
+        i = j
 
 
 def compile_ticket(parsed: dict, workspace: dict[str, str] | None) -> dict:
@@ -287,6 +395,19 @@ def compile_ticket(parsed: dict, workspace: dict[str, str] | None) -> dict:
         if name not in examples_by_name:
             examples_by_name[name] = []
         examples_by_name[name].append(ex)
+
+    # Group raises-expectations (tests only — they never feed repair/synth).
+    raises_by_name: dict[str, list[dict]] = {}
+    raises_order: list[str] = []
+    for r in parsed.get("raises", []):
+        if r["name"] not in raises_by_name:
+            raises_by_name[r["name"]] = []
+            raises_order.append(r["name"])
+        raises_by_name[r["name"]].append(r)
+
+    def _raises_rows(name: str) -> list[dict]:
+        return [{"in": r["args"], "raises": r["raises"]}
+                for r in raises_by_name.get(name, [])]
 
     # Process each function with examples
     for func_name in sorted(examples_by_name.keys()):
@@ -320,6 +441,18 @@ def compile_ticket(parsed: dict, workspace: dict[str, str] | None) -> dict:
             })
             decision = f"repair {func_name} — line {first_line_no}: \"{line_text.strip()}\""
             decisions.append(decision)
+            if raises_by_name.get(func_name):
+                # Raises-expectations become tests beside the repair.
+                actions.append({
+                    "kind": "gentest",
+                    "name": func_name,
+                    "examples": spec["examples"] + _raises_rows(func_name),
+                    "provenance": [raises_by_name[func_name][0]["source_line"]],
+                })
+                decisions.append(
+                    f"raises-expectations for {func_name} — tests only "
+                    "(cannot drive repair/synth)"
+                )
         else:
             # Actions: synth + gentest
             actions.append({
@@ -331,11 +464,16 @@ def compile_ticket(parsed: dict, workspace: dict[str, str] | None) -> dict:
             actions.append({
                 "kind": "gentest",
                 "name": func_name,
-                "examples": spec["examples"],
+                "examples": spec["examples"] + _raises_rows(func_name),
                 "provenance": [first_line_no],
             })
             decision = f"synthesize — line {first_line_no}: \"{line_text.strip()}\""
             decisions.append(decision)
+            if raises_by_name.get(func_name):
+                decisions.append(
+                    f"raises-expectations for {func_name} — tests only "
+                    "(cannot drive repair/synth)"
+                )
 
     # If no examples matched but wants_new and has direction, action to build project
     if not actions and parsed["flags"]["wants_new"] and parsed["direction"]:
@@ -348,12 +486,35 @@ def compile_ticket(parsed: dict, workspace: dict[str, str] | None) -> dict:
         decision = f"new project — line 1: \"{parsed['lines'][0].strip()}\""
         decisions.append(decision)
 
+    # Raises-only functions: tests when the def exists; otherwise an honest
+    # question — a raises spec alone cannot derive code.
+    for name in raises_order:
+        if name in examples_by_name:
+            continue  # attached to that function's actions above
+        first_line = raises_by_name[name][0]["source_line"]
+        if _find_definition(name, workspace, parsed["code_blocks"]):
+            actions.append({
+                "kind": "gentest",
+                "name": name,
+                "examples": _raises_rows(name),
+                "provenance": [first_line],
+            })
+            decisions.append(
+                f"raises-only tests for {name} — line {first_line}: "
+                f"\"{parsed['lines'][first_line - 1].strip()}\""
+            )
+        else:
+            questions.append(
+                f"give one value example for {name}: {name}(...) == ? "
+                "(raises-only specs cannot derive code)"
+            )
+
     # Open questions — per function: every referenced function with no
     # examples (and therefore no action) becomes one precise question, even
     # when other functions in the same ticket produced actions.
     for func_name in parsed["functions"]:
-        if func_name in examples_by_name:
-            continue  # already actioned above
+        if func_name in examples_by_name or func_name in raises_by_name:
+            continue  # already actioned or questioned above
         if parsed["flags"]["wants_tests"]:
             questions.append(f"give one example: {func_name}(...) == ?")
         elif parsed["flags"]["wants_fix"]:
@@ -436,7 +597,7 @@ def run_ticket(text: str, files: dict[str, str] | None = None, store=None) -> Re
                 files_out[target if target != "ticket-code" else f"{action['name']}.py"] = result.source
                 line = f"✓ repair {action['name']}"
                 if len(action["examples"]) == 1:
-                    note = _single_example_note(action["name"])
+                    note = single_example_note(action["name"])
                     line += f" — {note}"
                     decisions_out.append(note)
                 output_lines.append(line)
@@ -452,7 +613,7 @@ def run_ticket(text: str, files: dict[str, str] | None = None, store=None) -> Re
                 files_out[f"{name}.py"] = result.source
                 line = f"✓ synth {name}"
                 if len(action["examples"]) == 1:
-                    note = _single_example_note(name)
+                    note = single_example_note(name)
                     line += f" — {note}"
                     decisions_out.append(note)
                 output_lines.append(line)
@@ -550,7 +711,7 @@ def _find_definition(func_name: str, workspace: dict[str, str] | None,
     return target
 
 
-def _single_example_note(name: str) -> str:
+def single_example_note(name: str) -> str:
     """Honesty note: one example is a weak oracle for a derived change."""
     return (
         f"note: derived from a single example — add a second "
@@ -559,11 +720,16 @@ def _single_example_note(name: str) -> str:
 
 
 def _parse_args(args_str: str) -> list:
-    """Parse comma-separated literal arguments."""
+    """Parse comma-separated literal arguments.
+
+    Empty parens mean a zero-arg call; anything that does not literal-parse
+    raises ValueError so callers SKIP the candidate — a bad cell or symbolic
+    args (``double(x, y)``) must never silently become a zero-arg example.
+    """
     if not args_str.strip():
         return []
     try:
         # Wrap in list literal for ast.literal_eval
         return ast.literal_eval(f"[{args_str}]")
-    except (ValueError, SyntaxError):
-        return []
+    except (ValueError, SyntaxError) as exc:
+        raise ValueError(f"non-literal arguments {args_str!r}") from exc

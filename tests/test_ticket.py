@@ -490,6 +490,242 @@ class RunTicketTests(unittest.TestCase):
         self.assertTrue(resp.get("refused"))
 
 
+class RicherExtractionTests(unittest.TestCase):
+    def test_doctest_form(self):
+        parsed = ticket.parse_ticket(">>> area(2, 3)\n6")
+        self.assertEqual(parsed["examples"], [
+            {"name": "area", "args": [2, 3], "expected": 6, "source_line": 1}
+        ])
+
+    def test_doctest_skips_blank_line_to_expectation(self):
+        parsed = ticket.parse_ticket(">>> double(4)\n\n8")
+        self.assertEqual(parsed["examples"][0]["expected"], 8)
+
+    def test_bullet_forms(self):
+        text = dedent("""
+            - area(2, 3) == 6
+            * area(4, 5) returns 20
+            1. area(1, 5) -> 5
+        """)
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual([e["expected"] for e in parsed["examples"]], [6, 20, 5])
+
+    def test_call_actual_expected_block(self):
+        text = dedent("""
+            Call: area(2, 3)
+            Actual: 5
+            Expected: 6
+        """)
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual(parsed["examples"], [
+            {"name": "area", "args": [2, 3], "expected": 6, "source_line": 1}
+        ])
+
+    def test_call_block_expected_before_actual(self):
+        text = "Call: area(2, 3)\nExpected: 6\nActual: 5"
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual(parsed["examples"][0]["expected"], 6)
+
+    def test_single_line_actual_expected(self):
+        parsed = ticket.parse_ticket("area(2, 3): actual 5, expected 6")
+        self.assertEqual(parsed["examples"], [
+            {"name": "area", "args": [2, 3], "expected": 6, "source_line": 1}
+        ])
+
+    def test_markdown_table_with_context_name(self):
+        text = dedent("""
+            The `scale` helper misbehaves:
+
+            | input | expected |
+            |-------|----------|
+            | 2, 3  | 6        |
+            | 4, 4  | 16       |
+        """)
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual(
+            [(e["name"], e["args"], e["expected"]) for e in parsed["examples"]],
+            [("scale", [2, 3], 6), ("scale", [4, 4], 16)],
+        )
+
+    def test_markdown_table_with_call_column(self):
+        text = dedent("""
+            | call | result |
+            |------|--------|
+            | `area(2, 3)` | 6 |
+            | perimeter(2, 3) | 10 |
+        """)
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual(
+            [(e["name"], e["expected"]) for e in parsed["examples"]],
+            [("area", 6), ("perimeter", 10)],
+        )
+
+    def test_dedupe_across_forms_keeps_first_mention(self):
+        text = dedent("""
+            area(2, 3) == 6
+            >>> area(2, 3)
+            6
+            area(4, 5) -> 20
+        """)
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual(
+            [(e["args"], e["expected"]) for e in parsed["examples"]],
+            [([2, 3], 6), ([4, 5], 20)],
+        )
+        self.assertEqual(parsed["examples"][0]["source_line"], 1)
+
+
+class NonLiteralArgsTests(unittest.TestCase):
+    """BUG A: unparseable args must skip the candidate, never become []."""
+
+    def test_bad_table_input_cell_skipped_good_rows_survive(self):
+        text = ("## The `double` function is wrong\n\n"
+                "| input | output |\n|---|---|\n| 2 | 4 |\n| oops( | 8 |\n")
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual(parsed["examples"], [
+            {"name": "double", "args": [2], "expected": 4, "source_line": 5}
+        ])
+        result = ticket.run_ticket(text, files=None)
+        self.assertTrue(result.ok, result.output)
+        self.assertIn("double.py", result.files)
+        self.assertEqual(run(result.files["double.py"], "double")(2), 4)
+
+    def test_non_literal_args_produce_no_example_in_eq_form(self):
+        parsed = ticket.parse_ticket("double(x, y) == 4")
+        self.assertEqual(parsed["examples"], [])
+        # A ticket that is ONLY that refuses instead of running a phantom spec.
+        with self.assertRaises(ticket.TicketError):
+            ticket.run_ticket("double(x, y) == 4", files=None)
+
+    def test_doctest_with_non_literal_args_skipped(self):
+        parsed = ticket.parse_ticket(">>> double(x)\n8")
+        self.assertEqual(parsed["examples"], [])
+
+    def test_non_literal_raises_args_skipped(self):
+        parsed = ticket.parse_ticket("guard(x) raises ValueError")
+        self.assertEqual(parsed["raises"], [])
+
+
+class RaisesTicketTests(unittest.TestCase):
+    def test_parse_raises_forms(self):
+        text = dedent("""
+            area(-1, 5) raises ValueError
+            area(0, 0) should raise ZeroDivisionError
+        """)
+        parsed = ticket.parse_ticket(text)
+        self.assertEqual(parsed["raises"], [
+            {"name": "area", "args": [-1, 5], "raises": "ValueError", "source_line": 1},
+            {"name": "area", "args": [0, 0], "raises": "ZeroDivisionError",
+             "source_line": 2},
+        ])
+
+    def test_synth_spec_excludes_raises_rows(self):
+        """AC3.2: raises rows land in gentest, never in the synth spec."""
+        text = dedent("""
+            We need a function double where double(2) == 4 and double(3) == 6
+            double(-1) raises ValueError
+        """)
+        compiled = ticket.compile_ticket(ticket.parse_ticket(text), None)
+        synth = next(a for a in compiled["actions"] if a["kind"] == "synth")
+        gentest_action = next(a for a in compiled["actions"] if a["kind"] == "gentest")
+        self.assertTrue(all("raises" not in ex for ex in synth["examples"]))
+        raises_rows = [ex for ex in gentest_action["examples"] if "raises" in ex]
+        self.assertEqual(raises_rows, [{"in": [-1], "raises": "ValueError"}])
+
+    def test_raises_beside_repair_gets_gentest_action(self):
+        text = "Fix area: area(2, 3) == 6\narea(-1, 5) raises ValueError"
+        workspace = {"area.py": "def area(w, h):\n    return w + h\n"}
+        compiled = ticket.compile_ticket(ticket.parse_ticket(text), workspace)
+        kinds = [a["kind"] for a in compiled["actions"]]
+        self.assertEqual(kinds, ["repair", "gentest"])
+        # The repair spec never carries a raises row.
+        self.assertTrue(all("raises" not in ex
+                            for ex in compiled["actions"][0]["examples"]))
+
+    def test_raises_only_and_undefined_asks_for_value_example(self):
+        parsed = ticket.parse_ticket("mystery(-1) raises ValueError")
+        compiled = ticket.compile_ticket(parsed, None)
+        self.assertEqual(compiled["actions"], [])
+        self.assertEqual(len(compiled["questions"]), 1)
+        self.assertIn("mystery(...) == ?", compiled["questions"][0])
+        self.assertIn("raises-only", compiled["questions"][0])
+
+    def test_raises_only_with_def_generates_tests(self):
+        parsed = ticket.parse_ticket("guard(-1) raises ValueError")
+        workspace = {
+            "guard.py": ("def guard(n):\n"
+                         "    if n < 0:\n"
+                         "        raise ValueError(n)\n"
+                         "    return n\n")
+        }
+        compiled = ticket.compile_ticket(parsed, workspace)
+        self.assertEqual([a["kind"] for a in compiled["actions"]], ["gentest"])
+        result = ticket.run_ticket("guard(-1) raises ValueError", files=workspace)
+        self.assertTrue(result.ok, result.output)
+        self.assertIn("tests/test_guard.py", result.files)
+        self.assertIn("assertRaises(ValueError)", result.files["tests/test_guard.py"])
+
+
+MESSY_TICKET = """\
+Bug: area() computes the wrong value
+Priority: High
+Assignee: alex
+
+## Steps to reproduce
+1. Open the calculator page
+2. Enter width 2 and height 3
+3. Observe the printed area
+
+The result is nonsense. Our doctest says:
+
+>>> area(2, 3)
+6
+
+But instead we saw this on staging:
+
+Call: area(4, 5)
+Actual: 9
+Expected: 20
+
+The offending code lives here:
+
+```python
+def area(w, h):
+    return w + h
+```
+
+Thanks for looking into this!
+-- alex
+"""
+
+
+class NoisyTicketTests(unittest.TestCase):
+    def test_messy_ticket_extracts_only_the_real_examples(self):
+        parsed = ticket.parse_ticket(MESSY_TICKET)
+        self.assertEqual(
+            [(e["name"], e["args"], e["expected"]) for e in parsed["examples"]],
+            [("area", [2, 3], 6), ("area", [4, 5], 20)],
+        )
+        self.assertEqual(parsed["raises"], [])
+
+    def test_messy_ticket_repairs_and_passes_all_examples(self):
+        compiled = ticket.compile_ticket(ticket.parse_ticket(MESSY_TICKET), None)
+        self.assertEqual([a["kind"] for a in compiled["actions"]], ["repair"])
+        result = ticket.run_ticket(MESSY_TICKET, files=None)
+        self.assertTrue(result.ok, result.output)
+        repaired = result.files["area.py"]
+        area = run(repaired, "area")
+        self.assertEqual(area(2, 3), 6)
+        self.assertEqual(area(4, 5), 20)
+
+    def test_messy_ticket_is_deterministic(self):
+        first = ticket.run_ticket(MESSY_TICKET, files=None)
+        second = ticket.run_ticket(MESSY_TICKET, files=None)
+        self.assertEqual(canonical_json(first.report), canonical_json(second.report))
+        self.assertEqual(first.files, second.files)
+        self.assertEqual(first.output, second.output)
+
+
 class CliExitCodeTests(unittest.TestCase):
     """detcode ticket exit codes: 0 = actions all ran, 1 = questions-only or
     refused action, 2 = the ticket itself was refused as too vague."""

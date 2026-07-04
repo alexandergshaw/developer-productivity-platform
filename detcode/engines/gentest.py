@@ -60,7 +60,17 @@ def _validate(spec: dict) -> tuple[str, list[dict]]:
     if not isinstance(examples, list) or not examples:
         raise SpecError("spec must provide a non-empty 'examples' list")
     for i, ex in enumerate(examples):
-        if not isinstance(ex, dict) or "in" not in ex or "out" not in ex:
+        if not isinstance(ex, dict) or "in" not in ex:
+            raise SpecError(f"example {i} must have 'in' and 'out'")
+        if "out" in ex and "raises" in ex:
+            raise SpecError(f"example {i} must have 'out' or 'raises', not both")
+        if "raises" in ex:
+            raised = ex["raises"]
+            if not isinstance(raised, str) or not raised.isidentifier():
+                raise SpecError(
+                    f"example {i} 'raises' must name an exception (identifier)"
+                )
+        elif "out" not in ex:
             raise SpecError(f"example {i} must have 'in' and 'out'")
         if not isinstance(ex["in"], list):
             raise SpecError(f"example {i} 'in' must be a list")
@@ -208,7 +218,11 @@ def gentest(spec: dict) -> Result:
     for i, ex in enumerate(examples):
         args = ", ".join(repr(a) for a in ex["in"])
         lines.append(f"{INDENT}def test_{func}_{i}(self):")
-        lines.append(f"{INDENT}{INDENT}self.assertEqual({func}({args}), {ex['out']!r})")
+        if "raises" in ex:
+            lines.append(f"{INDENT}{INDENT}with self.assertRaises({ex['raises']}):")
+            lines.append(f"{INDENT}{INDENT}{INDENT}{func}({args})")
+        else:
+            lines.append(f"{INDENT}{INDENT}self.assertEqual({func}({args}), {ex['out']!r})")
         lines.append("")
 
     edges: list[tuple] = []

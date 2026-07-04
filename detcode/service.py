@@ -17,7 +17,8 @@ Request shape::
     {"tool": "imports",  "source": "..."}
     {"tool": "explain",  "source": "...", "func": "..."?}
     {"tool": "ticket",   "text": "...", "files": {...}?}
-    {"tool": "converse", "utterance": "...", "state": {...}?, "source": "..."?}
+    {"tool": "converse", "utterance": "...", "state": {...}?, "source": "..."?,
+     "files": {...}?}
 
 Response shape::
 
@@ -322,6 +323,7 @@ def run_request(req, store=None) -> dict:
                 req.get("state"),
                 req.get("source"),
                 store,
+                files=req.get("files") if isinstance(req.get("files"), dict) else None,
             )
         return {"ok": False, "refused": False, "error": f"unknown tool {tool!r}"}
     except REFUSALS as exc:

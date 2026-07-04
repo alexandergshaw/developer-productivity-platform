@@ -2485,13 +2485,40 @@ const HELP = [
   ["chat", "toggle the Gemini chat side bar (Ctrl+Alt+I)"],
   ["float", "move the active tab into a floating window (or drag it out)"],
   ["save / save project", "write buffers back to disk (also Ctrl+S)"],
-  ["<anything else>", "talk to the engine — it asks precise questions when it needs a spec (reset clears context)"],
+  ["<anything else>", "talk to the engine — it collects examples until you say \"done\" (reset clears context)"],
 ].map(([c, d]) => `  <span class="ok">${esc(c.padEnd(22))}</span><span class="dim">${esc(d)}</span>`).join("\n");
 
 let converseState = null;
 
+function applyFilesMap(fileMap) {
+  let activeChanged = false;
+  const touched = [];
+  for (const [p, content] of Object.entries(fileMap)) {
+    const path = folderName ? `${folderName}/${p}` : p;
+    const existing = files.get(path);
+    if (existing) {
+      files.set(path, { content, dirty: existing.content !== content });
+      if (path === active) activeChanged = true;
+    } else {
+      files.set(path, { content, dirty: false, generated: true });
+    }
+    touched.push(path);
+  }
+  renderTree(); renderScm();
+  if (activeChanged) renderEditorFor(activeGroup);
+  for (const path of touched) updateFloat(path);
+  return touched;
+}
+
 function applyEngineResponse(resp) {
-  if (resp.kind === "edit") {
+  if (resp.kind === "edit" && resp.files) {
+    // File-targeted edit: the engine names exactly which files changed.
+    const touched = applyFilesMap(resp.files);
+    for (const path of touched) {
+      termPrint(`<span class="ok">✎ applied to ${esc(path)} (in-memory buffer)</span>`);
+    }
+    if (resp.text) termPrint(esc(resp.text));
+  } else if (resp.kind === "edit") {
     if (active && files.has(active)) {
       const changed = files.get(active).content !== resp.output;
       files.set(active, { content: resp.output, dirty: changed });
@@ -2523,7 +2550,17 @@ function stepReport(report, rule) {
   return report;
 }
 
-async function runCommand(raw) {
+// Commands run strictly one at a time: rapid turns ("2 -> 4" then "done")
+// must see the converseState produced by the previous response, so each
+// command is enqueued and starts only after the prior one fully settles.
+// The catch keeps a thrown command from wedging the queue forever.
+let commandQueue = Promise.resolve();
+function runCommand(raw) {
+  commandQueue = commandQueue.then(() => _runCommand(raw)).catch(() => {});
+  return commandQueue;
+}
+
+async function _runCommand(raw) {
   showPanel("terminal");
   termPrint(`<span class="tp">detcode&gt;</span> ${esc(raw)}`);
   const cmd = raw.trim().replace(/^detcode\s+/, "");
@@ -2613,21 +2650,7 @@ async function runCommand(raw) {
       const resp = await api({ tool: "ticket", text, files: projectFiles() || undefined });
       if (!resp.ok) { termPrint(`<span class="err">${resp.refused ? "refused" : "error"}: ${esc(resp.error)}</span>`); return; }
       termPrint(esc(resp.output));
-      if (resp.files) {
-        let activeChanged = false;
-        for (const [p, content] of Object.entries(resp.files)) {
-          const path = folderName ? `${folderName}/${p}` : p;
-          const existing = files.get(path);
-          if (existing) {
-            files.set(path, { content, dirty: existing.content !== content });
-            if (path === active) activeChanged = true;
-          } else {
-            files.set(path, { content, dirty: false, generated: true });
-          }
-        }
-        renderTree(); renderScm();
-        if (activeChanged) { renderEditorFor(activeGroup); updateFloat(active); }
-      }
+      if (resp.files) applyFilesMap(resp.files);
       for (const d of (resp.report && resp.report.decisions) || []) {
         termPrint(`<span class="dim">  - ${esc(d)}</span>`);
       }
@@ -2647,7 +2670,10 @@ async function runCommand(raw) {
       if (resp.ok) { materialize(resp.files, resp.report); return; }
     } else {
       const source = active && files.has(active) ? files.get(active).content : undefined;
-      resp = await api({ tool: "converse", utterance: cmd, state: converseState, source });
+      resp = await api({
+        tool: "converse", utterance: cmd, state: converseState, source,
+        files: projectFiles() || undefined,
+      });
       if (resp.ok) {
         if (resp.state) converseState = resp.state;
         applyEngineResponse(resp);

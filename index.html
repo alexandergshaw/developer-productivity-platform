@@ -2206,6 +2206,8 @@ const QUICK = [
   'fix area so that area(2, 3) == 6 and area(4, 5) == 20',
   'generate tests for area where area(2, 3) == 6',
   "remove unused imports then document",
+  "ticket",
+  'ticket fix area so that area(2, 3) == 6',
 ];
 $("quick-cmds").innerHTML = QUICK.map(c =>
   `<div class="sb-item" data-cmd="${esc(c)}"><span class="mono">${esc(c)}</span></div>`).join("");
@@ -2474,15 +2476,45 @@ const HELP = [
   ["ls", "list loaded files"],
   ["open <path>", "open a file in the editor"],
   ['new "<direction>"', "generate a project — stacks: flask/fastapi/django/node/express/react/typescript/golang/rust"],
+  ["ticket", "turn a problem description (active file or inline text) into verified code"],
   ["query <question>", "knowledge web: evidence with citations"],
   ["mint <kw1,kw2>", "mint the workspace as a pack (its tests must pass)"],
   ["test", "run the workspace tests server-side"],
+  ["reset", "clear the conversation context"],
   ["split / split down", "split right (Ctrl+\\) or down (Ctrl+K Ctrl+\\) — compose into grids"],
   ["chat", "toggle the Gemini chat side bar (Ctrl+Alt+I)"],
   ["float", "move the active tab into a floating window (or drag it out)"],
   ["save / save project", "write buffers back to disk (also Ctrl+S)"],
-  ["<anything else>", "English, acting on the active file (ask/fix/explain/...)"],
+  ["<anything else>", "talk to the engine — it asks precise questions when it needs a spec (reset clears context)"],
 ].map(([c, d]) => `  <span class="ok">${esc(c.padEnd(22))}</span><span class="dim">${esc(d)}</span>`).join("\n");
+
+let converseState = null;
+
+function applyEngineResponse(resp) {
+  if (resp.kind === "edit") {
+    if (active && files.has(active)) {
+      const changed = files.get(active).content !== resp.output;
+      files.set(active, { content: resp.output, dirty: changed });
+      groups.forEach((_g, gi) => renderTabsFor(gi)); renderTree(); renderScm();
+      renderEditorFor(activeGroup);
+      updateFloat(active);
+      termPrint(changed
+        ? `<span class="ok">✎ applied to ${esc(active)} (in-memory buffer)</span>`
+        : `<span class="dim">no change needed in ${esc(active)}</span>`);
+    } else {
+      termPrint(`<span class="err">this command edits a file — open one first</span>`);
+    }
+    if (resp.text) termPrint(esc(resp.text));
+  } else if (resp.files) {
+    materialize(resp.files, stepReport(resp.report, "build"));
+  } else {
+    const question = resp.state && resp.state.pending;
+    termPrint(question ? `<span class="v">engine?</span> ${esc(resp.output)}` : esc(resp.output));
+  }
+  const rule = resp.report && (resp.report.rule || "");
+  if (rule) termPrint(`<span class="dim">  [${esc(rule)}${resp.report.entry ? ": " + esc(resp.report.entry) : ""}]</span>`);
+  if (rule === "ask" || rule === "teach") refreshStudy();
+}
 
 function stepReport(report, rule) {
   if (!report) return report;
@@ -2498,6 +2530,7 @@ async function runCommand(raw) {
   if (!cmd) return;
   if (cmd === "help" || cmd === "--help" || cmd === "-h") { termPrint(HELP); return; }
   if (cmd === "clear") { $("term-out").innerHTML = ""; return; }
+  if (cmd === "reset") { converseState = null; termPrint("conversation context cleared"); return; }
   if (cmd === "split" || cmd === "split right") { splitEditor(); return; }
   if (cmd === "split down") { splitDown(); return; }
   if (cmd === "chat") { toggleChat(); return; }
@@ -2569,6 +2602,42 @@ async function runCommand(raw) {
   if (mintMatch) { await runMint(mintMatch[1].trim()); return; }
   if (cmd === "mint") { termPrint('<span class="err">give keywords: mint studybuddy,revision</span>'); return; }
 
+  const ticketMatch = /^ticket(?:\s+([\s\S]+))?$/.exec(cmd);
+  if (ticketMatch) {
+    let text = ticketMatch[1] && ticketMatch[1].trim();
+    if (!text) {
+      if (active && files.has(active)) text = files.get(active).content;
+      else { termPrint('<span class="err">open a ticket file first, or: ticket &lt;text&gt;</span>'); return; }
+    }
+    try {
+      const resp = await api({ tool: "ticket", text, files: projectFiles() || undefined });
+      if (!resp.ok) { termPrint(`<span class="err">${resp.refused ? "refused" : "error"}: ${esc(resp.error)}</span>`); return; }
+      termPrint(esc(resp.output));
+      if (resp.files) {
+        let activeChanged = false;
+        for (const [p, content] of Object.entries(resp.files)) {
+          const path = folderName ? `${folderName}/${p}` : p;
+          const existing = files.get(path);
+          if (existing) {
+            files.set(path, { content, dirty: existing.content !== content });
+            if (path === active) activeChanged = true;
+          } else {
+            files.set(path, { content, dirty: false, generated: true });
+          }
+        }
+        renderTree(); renderScm();
+        if (activeChanged) { renderEditorFor(activeGroup); updateFloat(active); }
+      }
+      for (const d of (resp.report && resp.report.decisions) || []) {
+        termPrint(`<span class="dim">  - ${esc(d)}</span>`);
+      }
+      if (resp.report && resp.report.questions && resp.report.questions.length) refreshStudy();
+    } catch (err) {
+      termPrint(`<span class="err">request failed: ${esc(String(err))}</span>`);
+    }
+    return;
+  }
+
   const newMatch = /^new\s+(.+)$/.exec(cmd);
   try {
     let resp;
@@ -2578,29 +2647,10 @@ async function runCommand(raw) {
       if (resp.ok) { materialize(resp.files, resp.report); return; }
     } else {
       const source = active && files.has(active) ? files.get(active).content : undefined;
-      resp = await api({ tool: "do", command: cmd, source });
+      resp = await api({ tool: "converse", utterance: cmd, state: converseState, source });
       if (resp.ok) {
-        if (resp.files) { materialize(resp.files, stepReport(resp.report, "build")); return; }
-        if (resp.kind === "edit") {
-          if (active && files.has(active)) {
-            const changed = files.get(active).content !== resp.output;
-            files.set(active, { content: resp.output, dirty: changed });
-            groups.forEach((_g, gi) => renderTabsFor(gi)); renderTree(); renderScm();
-            renderEditorFor(activeGroup);
-            updateFloat(active);
-            termPrint(changed
-              ? `<span class="ok">✎ applied to ${esc(active)} (in-memory buffer)</span>`
-              : `<span class="dim">no change needed in ${esc(active)}</span>`);
-          } else {
-            termPrint(`<span class="err">this command edits a file — open one first</span>`);
-          }
-          if (resp.text) termPrint(esc(resp.text));
-        } else {
-          termPrint(esc(resp.output));
-        }
-        const rule = resp.report && (resp.report.rule || "");
-        if (rule) termPrint(`<span class="dim">  [${esc(rule)}${resp.report.entry ? ": " + esc(resp.report.entry) : ""}]</span>`);
-        if (rule === "ask" || rule === "teach") refreshStudy();
+        if (resp.state) converseState = resp.state;
+        applyEngineResponse(resp);
         return;
       }
     }

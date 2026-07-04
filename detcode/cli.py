@@ -18,6 +18,7 @@ import os
 
 from .engines import (
     builder,
+    converse as converse_engine,
     document,
     explain,
     gentest,
@@ -29,6 +30,7 @@ from .engines import (
     scaffold,
     synth,
     teach,
+    ticket,
 )
 
 
@@ -715,6 +717,85 @@ def _cmd_plan(args) -> int:
     return 0
 
 
+def _cmd_ticket(args) -> int:
+    from . import store as store_module
+
+    ticket_text = _read(args.file)
+    root = args.dir or "."
+
+    # Load workspace files
+    workspace: dict[str, str] = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not d.startswith(".") and d != "__pycache__"]
+        for fname in sorted(filenames):
+            if not fname.endswith(".py"):
+                continue
+            full = os.path.join(dirpath, fname)
+            rel = os.path.relpath(full, root).replace(os.sep, "/")
+            workspace[rel] = _read(full)
+
+    store = (
+        store_module.Store()
+        if os.path.exists(store_module.DEFAULT_DB_PATH)
+        else None
+    )
+
+    result = ticket.run_ticket(ticket_text, files=workspace, store=store)
+    # Exit 0 only when at least one action ran and none refused. A
+    # questions-only run is a legitimate response but not a success.
+    status = 0 if result.ok and result.report.get("actions") else 1
+
+    if args.dry_run:
+        print(result.output)
+        if result.files:
+            print("\nwould create/modify:", file=sys.stderr)
+            for path in sorted(result.files.keys()):
+                print(f"  {path}", file=sys.stderr)
+        return status
+
+    # Write files
+    if result.files:
+        for path, content in result.files.items():
+            target = os.path.join(root, path.replace("/", os.sep))
+            os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+            _write(target, content)
+
+    print(result.output, file=sys.stderr)
+    if result.report.get("questions"):
+        print("\nopen questions:", file=sys.stderr)
+        for q in result.report["questions"]:
+            print(f"  ? {q}", file=sys.stderr)
+    return status
+
+
+DEFAULT_CONVERSE_STATE = os.path.join(".detcode", "converse.json")
+
+
+def _cmd_converse(args) -> int:
+    from . import store as store_module
+    from .determinism import canonical_json
+
+    state_path = args.state or DEFAULT_CONVERSE_STATE
+    state = json.loads(_read(state_path)) if os.path.exists(state_path) else None
+    source = _read(args.file) if args.file else None
+    store = (
+        store_module.Store()
+        if os.path.exists(store_module.DEFAULT_DB_PATH)
+        else None
+    )
+    resp = converse_engine.converse(args.utterance, state, source, store)
+    print(resp["output"])
+    if resp.get("kind") == "edit" and resp.get("changed"):
+        if args.file and args.write:
+            _write(args.file, resp["output"])
+            print(f"{args.file}: updated", file=sys.stderr)
+        elif args.file:
+            print(f"{args.file}: edit produced — pass --write to apply it", file=sys.stderr)
+    os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
+    _write(state_path, canonical_json(resp["state"]) + "\n")
+    return 0
+
+
 def _user_packs() -> tuple:
     from . import store as store_module
 
@@ -1163,6 +1244,30 @@ def build_parser() -> argparse.ArgumentParser:
     out.add_argument("--diff", action="store_true", help="print a unified diff")
     do.set_defaults(handler=_cmd_do)
 
+    tk = sub.add_parser(
+        "ticket",
+        help='compile a ticket (problem description) into verified code',
+    )
+    tk.add_argument("file", help="ticket file to process")
+    tk.add_argument("--dir", help="workspace directory to scan for existing code (default: .)")
+    tk.add_argument("--dry-run", action="store_true", help="show plan without writing files")
+    tk.set_defaults(handler=_cmd_ticket)
+
+    cv = sub.add_parser(
+        "converse",
+        help="talk to the engine — it asks precise questions when it needs a spec",
+    )
+    cv.add_argument(
+        "utterance", help='e.g. "write a function double" — the engine asks for an example'
+    )
+    cv.add_argument(
+        "--state",
+        help=f"conversation state file, round-tripped each turn (default: {DEFAULT_CONVERSE_STATE})",
+    )
+    cv.add_argument("--file", help="Python source file the conversation acts on")
+    cv.add_argument("--write", action="store_true", help="write produced edits back to --file")
+    cv.set_defaults(handler=_cmd_converse)
+
     return parser
 
 
@@ -1192,6 +1297,8 @@ def main(argv: list[str] | None = None) -> int:
         teach.TeachError,
         teach.CorpusError,
         mint_engine.MintError,
+        ticket.TicketError,
+        converse_engine.ConverseError,
         _knowledge_error(),
         _web_error(),
         _store_error(),

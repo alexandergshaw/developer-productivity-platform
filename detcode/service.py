@@ -16,6 +16,8 @@ Request shape::
     {"tool": "rename",   "source": "...", "func": "...", "old": "...", "new": "..."}
     {"tool": "imports",  "source": "..."}
     {"tool": "explain",  "source": "...", "func": "..."?}
+    {"tool": "ticket",   "text": "...", "files": {...}?}
+    {"tool": "converse", "utterance": "...", "state": {...}?, "source": "..."?}
 
 Response shape::
 
@@ -28,6 +30,7 @@ from __future__ import annotations
 from . import cnl, planner
 from .engines import (
     builder,
+    converse as converse_engine,
     document,
     explain,
     gentest,
@@ -36,6 +39,7 @@ from .engines import (
     rewrite,
     scaffold,
     synth,
+    ticket,
 )
 
 from .engines import teach as teach_engine
@@ -64,6 +68,8 @@ REFUSALS = (
     cnl.CNLError,
     planner.UnknownIntent,
     planner.MissingSource,
+    ticket.TicketError,
+    converse_engine.ConverseError,
 )
 
 
@@ -300,6 +306,23 @@ def run_request(req, store=None) -> dict:
             resp = _generated(r.questions + "\n\n" + r.plan_text, r.report)
             resp["files"] = {r.report["plan_file"]: r.plan_text}
             return resp
+        if tool == "ticket":
+            r = ticket.run_ticket(
+                str(req.get("text") or ""),
+                files=req.get("files"),
+                store=store,
+            )
+            resp = _text(r.output, r.report)
+            if r.files:
+                resp["files"] = r.files
+            return resp
+        if tool == "converse":
+            return converse_engine.converse(
+                str(req.get("utterance") or ""),
+                req.get("state"),
+                req.get("source"),
+                store,
+            )
         return {"ok": False, "refused": False, "error": f"unknown tool {tool!r}"}
     except REFUSALS as exc:
         return {"ok": False, "refused": True, "error": str(exc)}
